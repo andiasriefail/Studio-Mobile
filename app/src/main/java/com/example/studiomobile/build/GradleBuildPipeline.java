@@ -4,6 +4,7 @@ import android.content.Context;
 import android.os.Build;
 import android.os.Looper;
 import com.example.studiomobile.build.dependency.BuildToolCatalog;
+import com.example.studiomobile.build.gradle.AndroidSdkLayout;
 import com.example.studiomobile.build.gradle.GradleRuntime;
 import com.example.studiomobile.build.gradle.GradleRuntimeManager;
 import com.example.studiomobile.build.process.BuildProcessRunner;
@@ -65,7 +66,26 @@ public final class GradleBuildPipeline implements BuildPipeline {
                 @Override public void onStarted(Process process) { activeProcess = process; }
                 @Override public void onFinished(Process process) { if (activeProcess == process) activeProcess = null; }
             });
-            BuildProcessRunner.Result result = runner.run(command, project, 30 * 60, logger, runtime.buildEnvironment());
+            final StringBuilder captured = new StringBuilder();
+            BuildLogger capturing = new BuildLogger() {
+                private void keep(String message) { synchronized (captured) { if (message != null && captured.length() < 2_000_000) captured.append(message).append('\n'); } }
+                @Override public void onInfo(String message) { keep(message); screenLog.onInfo(message); }
+                @Override public void onWarning(String message) { keep(message); screenLog.onWarning(message); }
+                @Override public void onError(String message, Throwable cause) { keep(message); screenLog.onError(message, cause); }
+            };
+            BuildProcessRunner.Result result = runner.run(command, project, 30 * 60, capturing, runtime.buildEnvironment());
+            if (!cancelled && !result.isSuccessful() && !result.isTimedOut()) {
+                String firstOutput; synchronized (captured) { firstOutput = captured.toString(); }
+                // The project asked for an Android platform or build-tools folder that is not installed. A newer installed platform can
+                // stand in for it, so it is provided from what the app already has and the build is started once more.
+                if (firstOutput.contains("Failed to install the following Android SDK packages")
+                        && AndroidSdkLayout.provideMissing(context.getFilesDir(), firstOutput, new ScreenLogger(logger)) > 0) {
+                    logger.onInfo("[step] Preparing the Android SDK");
+                    logger.onWarning("The project asked for Android SDK packages that are not installed. They were provided from the installed platform; building again.");
+                    logger.onInfo("[step] Starting the build engine");
+                    result = runner.run(command, project, 30 * 60, logger, runtime.buildEnvironment());
+                }
+            }
             if (cancelled) return new BuildResult(BuildResult.Status.CANCELLED, null, "Gradle build cancelled.");
             if (!result.isSuccessful() && !result.isTimedOut()) logger.onWarning("If the log shows checksum or 'Could not read' cache errors, clear the Gradle dependency cache and rebuild online.");
             if (!result.isSuccessful()) return failed(result.isTimedOut()
@@ -103,11 +123,12 @@ public final class GradleBuildPipeline implements BuildPipeline {
         }
         @Override public void onWarning(String message) { delegate.onWarning(message); }
         @Override public void onError(String message, Throwable cause) { delegate.onError(message, cause); }
+        /** Components of the app's own catalog (Gradle, JDK, NDK, Python) are deliberately not named on the screen. */
         private static String friendly(String message) {
             if (message.startsWith("Project requirements")) return "[step] Reading the project requirements";
-            if (message.startsWith("Unpacking bundled")) return "[step] Installing the build tools";
+            if (message.contains(" MiB downloaded")) return "[progress] Downloading the build tools · " + message.substring(message.lastIndexOf(": ") + 2).replace(" MiB downloaded", " MB");
             if (message.startsWith("Downloading ")) return "[step] Downloading the build tools";
-            if (message.contains(" MiB downloaded")) return "[progress] Downloading the build tools · " + message.substring(message.lastIndexOf(": ") + 2).replace(" downloaded", "");
+            if (message.startsWith("Unpacking bundled")) return "[step] Installing the build tools";
             if (message.startsWith("Ready:")) return "[step] Build tools ready";
             if (message.startsWith("java launcher self-test passed")) return "[step] Verifying the build tools";
             if (message.startsWith("Dependency preflight")) return "[step] Checking cached libraries";
@@ -115,22 +136,60 @@ public final class GradleBuildPipeline implements BuildPipeline {
         }
     }
 
-    /** Watches the Gradle dependency cache while Gradle runs and reports real download activity (Gradle itself prints nothing for it). */
+    /**
+     * Watches the Gradle dependency cache while Gradle runs and reports real download activity (Gradle itself prints nothing for it).
+     * Every library that appears in the cache gets its own timed line with its name (group:artifact:version).
+     */
     private static final class DownloadWatcher extends Thread {
-        private final File modules; private final BuildLogger logger; private volatile boolean stopped;
-        DownloadWatcher(File gradleUserHome, BuildLogger logger) { super("GradleDownloadWatcher"); setDaemon(true); this.modules = new File(gradleUserHome, "caches/modules-2"); this.logger = logger; }
+        private static final int MAX_LINES_PER_CHECK = 6;
+        private final File modules; private final File coordinates; private final BuildLogger logger; private volatile boolean stopped;
+        private final java.util.Set<String> seen = new java.util.HashSet<>();
+        DownloadWatcher(File gradleUserHome, BuildLogger logger) {
+            super("GradleDownloadWatcher"); setDaemon(true);
+            this.modules = new File(gradleUserHome, "caches/modules-2"); this.coordinates = new File(modules, "files-2.1"); this.logger = logger;
+        }
         void finish() { stopped = true; interrupt(); }
         @Override public void run() {
-            long base = size(modules), last = base, reported = base; int quiet = 0; boolean active = false;
+            long base = size(modules), last = base, reported = base;
+            scan(new java.util.ArrayList<String>());   // what is already cached is not a download
+            String latest = null;
             while (!stopped) {
-                try { Thread.sleep(4000); } catch (InterruptedException interrupted) { return; }
+                try { Thread.sleep(2000); } catch (InterruptedException interrupted) { return; }
+                java.util.List<String> fresh = new java.util.ArrayList<>();
+                scan(fresh);
+                for (int i = 0; i < fresh.size() && i < MAX_LINES_PER_CHECK; i++) logger.onInfo("[step] " + describe(fresh.get(i)));
+                if (fresh.size() > MAX_LINES_PER_CHECK) logger.onInfo("[step] Downloaded " + (fresh.size() - MAX_LINES_PER_CHECK) + " more libraries");
+                if (!fresh.isEmpty()) latest = fresh.get(fresh.size() - 1);
                 long now = size(modules);
-                if (now > last) {
-                    quiet = 0;
-                    if (!active) { active = true; logger.onInfo("[step] Downloading libraries"); }
-                    if (now - reported >= 256 * 1024) { reported = now; logger.onInfo("[progress] Downloading libraries · " + megabytes(now - base) + " so far"); }
-                } else if (++quiet >= 2) active = false;
+                if (now > last && now - reported >= 256 * 1024) {
+                    reported = now;
+                    logger.onInfo("[progress] Downloading libraries · " + megabytes(now - base) + " so far" + (latest == null ? "" : " · last: " + latest));
+                }
                 last = now;
+            }
+        }
+        /** "Downloaded plugin x" for Gradle plugins (including the Android Gradle Plugin), "Downloaded x" for every other library. */
+        private static String describe(String coordinate) {
+            String[] part = coordinate.split(":");
+            boolean plugin = part.length == 3 && (part[1].endsWith(".gradle.plugin") || (part[0].equals("com.android.tools.build") && part[1].equals("gradle")));
+            return (plugin ? "Downloaded plugin " : "Downloaded ") + coordinate;
+        }
+
+        /** Adds every group:artifact:version folder that was not seen before to the list. */
+        private void scan(java.util.List<String> fresh) {
+            File[] groups = coordinates.listFiles();
+            if (groups == null) return;
+            for (File group : groups) {
+                File[] artifacts = group.listFiles();
+                if (artifacts == null) continue;
+                for (File artifact : artifacts) {
+                    File[] versions = artifact.listFiles();
+                    if (versions == null) continue;
+                    for (File version : versions) {
+                        String key = group.getName() + ":" + artifact.getName() + ":" + version.getName();
+                        if (seen.add(key)) fresh.add(key);
+                    }
+                }
             }
         }
         private static String megabytes(long bytes) { return String.format(java.util.Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0)); }
@@ -143,51 +202,4 @@ public final class GradleBuildPipeline implements BuildPipeline {
             return total;
         }
     }
-
-    public static boolean isGradleProject(File project) {
-        if (project == null || !project.isDirectory()) return false;
-        return new File(project, "settings.gradle").isFile() || new File(project, "settings.gradle.kts").isFile()
-            || new File(project, "build.gradle").isFile() || new File(project, "build.gradle.kts").isFile();
-    }
-
-    private GradleRuntimeManager runtimeManager() {
-        if (runtimeManager == null) {
-            BuildToolCatalog catalog = null;
-            try { catalog = BuildToolCatalog.readVerified(context.getAssets().open("build-tools/catalog.json"), BuildToolCatalog.BUNDLED_CATALOG_SHA256); }
-            catch (Exception ignored) { /* no trusted catalog: detection still works, automatic install is disabled */ }
-            String javaHome = System.getenv("JAVA_HOME");
-            runtimeManager = new GradleRuntimeManager(context.getFilesDir(), catalog, java.util.Arrays.asList(Build.SUPPORTED_ABIS),
-                javaHome == null ? null : new File(javaHome), context.getAssets());
-        }
-        return runtimeManager;
-    }
-
-    private static File findApk(File project) {
-        List<File> apks = new ArrayList<>();
-        collectApks(new File(project, "app/build/outputs/apk"), apks);
-        if (apks.isEmpty()) collectApks(new File(project, "build/outputs/apk"), apks);
-        if (apks.isEmpty()) return null;
-        Collections.sort(apks, new Comparator<File>() {
-            @Override public int compare(File left, File right) { return Long.compare(right.lastModified(), left.lastModified()); }
-        });
-        for (File apk : apks) if (apk.isFile() && apk.length() > 0) return apk;
-        return null;
-    }
-    private static void collectApks(File directory, List<File> output) {
-        File[] children = directory.listFiles();
-        if (children == null) return;
-        for (File child : children) {
-            if (child.isDirectory()) collectApks(child, output);
-            else if (child.isFile() && child.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".apk")) output.add(child);
-        }
-    }
-    private static boolean copy(File source, File target) {
-        try (java.io.InputStream in = new java.io.FileInputStream(source); java.io.OutputStream out = new java.io.FileOutputStream(target)) {
-            byte[] buffer = new byte[32768]; int count;
-            while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
-            out.flush(); return target.isFile() && target.length() == source.length() && target.length() > 0;
-        } catch (Exception ignored) { return false; }
-    }
-    private static BuildResult failed(String message) { return new BuildResult(BuildResult.Status.FAILED, null, message); }
-    @Override public void cancel() { cancelled = true; GradleRuntimeManager manager = runtimeManager; if (manager != null) manager.cancel(); Process process = activeProcess; if (process != null) process.destroy(); }
 }
