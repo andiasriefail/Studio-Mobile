@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@color/log_bg" android:orientation="vertical">
+
+    <LinearLayout android:id="@+id/screen_header" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center_vertical" android:orientation="horizontal"
+        android:paddingStart="12dp" android:paddingEnd="16dp" android:paddingTop="12dp" android:paddingBottom="8dp">
+        <ImageView android:id="@+id/build_back" style="@style/Cosmic.IconButton" android:src="@drawable/ic_back"
+            android:tint="@color/night_text" android:contentDescription="@string/back" />
+        <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:layout_marginStart="8dp" android:orientation="vertical">
+            <TextView android:layout_width="match_parent" android:layout_height="wrap_content" android:text="@string/build_log"
+                android:textColor="@color/night_text" android:textSize="20sp" android:fontFamily="sans-serif-medium" />
+            <TextView android:id="@+id/build_project_name" android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:singleLine="true" android:ellipsize="end" android:textColor="@color/night_muted" android:textSize="14sp" />
+        </LinearLayout>
+        <TextView android:id="@+id/btn_copy_log" android:layout_width="wrap_content" android:layout_height="48dp"
+            android:background="@drawable/bg_button_pink" android:clickable="true" android:focusable="true"
+            android:foreground="?attr/selectableItemBackground" android:drawableStart="@drawable/ic_copy"
+            android:drawableTint="@color/cosmic_ink" android:drawablePadding="8dp" android:gravity="center"
+            android:paddingStart="18dp" android:paddingEnd="18dp" android:text="@string/copy_log"
+            android:textColor="@color/cosmic_ink" android:textSize="15sp" android:fontFamily="sans-serif-medium" />
+    </LinearLayout>
+
+    <ProgressBar android:id="@+id/build_progress" style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent" android:layout_height="3dp" android:indeterminate="true"
+        android:indeterminateTint="@color/cosmic_pink" android:visibility="gone" />
+
+    <ScrollView android:id="@+id/log_scroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <TextView android:id="@+id/full_log_text" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:fontFamily="monospace" android:padding="16dp" android:text="@string/no_output"
+            android:textColor="@color/log_text" android:textIsSelectable="true" android:textSize="13sp" />
+    </ScrollView>
+</LinearLayout>

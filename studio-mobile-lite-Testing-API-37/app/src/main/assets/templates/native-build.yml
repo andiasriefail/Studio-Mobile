@@ -1,0 +1,58 @@
+# Studio Mobile template: build the C/C++ code of YOUR project into .so files on GitHub Actions.
+# Copy this file to  .github/workflows/native-build.yml  in your own repository, then run it from the Actions tab.
+# Download the "native-libs" artifact and import it in Studio Mobile (it is unpacked into src/main/jniLibs).
+name: Build native libraries
+
+on:
+  workflow_dispatch:
+    inputs:
+      cmake_dir:
+        description: Folder that contains CMakeLists.txt
+        default: app/src/main/cpp
+      min_sdk:
+        description: Android platform (API level, 21 or higher)
+        default: '24'
+      abis:
+        description: ABIs to build, separated by spaces
+        default: arm64-v8a armeabi-v7a x86_64 x86
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Build every ABI with the NDK preinstalled on the runner
+        env:
+          CMAKE_DIR: ${{ inputs.cmake_dir }}
+          MIN_SDK: ${{ inputs.min_sdk }}
+          ABIS: ${{ inputs.abis }}
+        run: |
+          set -euo pipefail
+          NDK="${ANDROID_NDK_LATEST_HOME:-${ANDROID_NDK_ROOT:-}}"
+          [ -d "$NDK" ] || { echo "No NDK found on this runner" >&2; exit 1; }
+          echo "Using NDK: $NDK"
+          for abi in $ABIS; do
+            case "$abi" in arm64-v8a|armeabi-v7a|x86|x86_64) ;; *) echo "Unsupported ABI: $abi" >&2; exit 1;; esac
+            flex=""
+            # 64-bit libraries must be 16 KB page aligned for Google Play (targetSdk 35+).
+            case "$abi" in arm64-v8a|x86_64) flex="-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON";; esac
+            cmake -G Ninja -S "$CMAKE_DIR" -B "build/$abi" \
+              -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI="$abi" -DANDROID_PLATFORM="android-$MIN_SDK" \
+              -DCMAKE_BUILD_TYPE=Release -DCMAKE_LIBRARY_OUTPUT_DIRECTORY="$PWD/out/lib/$abi" $flex
+            cmake --build "build/$abi"
+          done
+          find out -name '*.so' -print
+          test -n "$(find out -name '*.so' -print -quit)" || { echo "No .so was produced" >&2; exit 1; }
+      - name: Upload libraries
+        uses: actions/upload-artifact@v7
+        with:
+          name: native-libs
+          path: out/lib/
+          if-no-files-found: error
+          retention-days: 14
+          
