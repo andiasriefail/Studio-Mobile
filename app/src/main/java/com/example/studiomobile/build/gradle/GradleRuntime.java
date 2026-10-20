@@ -101,6 +101,7 @@ public final class GradleRuntime {
         List<String> args = new ArrayList<>();
         args.add("--no-daemon");
         args.add("--stacktrace");
+        args.add("--console=plain");   // one line per task and per configured project, so the Build screen can show progress
         args.add("-Duser.home=" + (getAndroidUserHome().getParentFile() != null ? getAndroidUserHome().getParentFile().getAbsolutePath() : getAndroidUserHome().getAbsolutePath()));
         args.add("--gradle-user-home"); args.add(gradleUserHome.getAbsolutePath());
         args.add("-Dorg.gradle.java.home=" + javaHome.getAbsolutePath());
