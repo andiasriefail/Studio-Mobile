@@ -103,7 +103,7 @@ public final class GradleRuntimeManager {
         }
         File sdk = new File(filesDirectory, "android-sdk");
         // Studio Mobile keeps android.jar under build-tools/platforms; the Gradle build expects an SDK folder, so present it as one.
-        File androidSdk = AndroidSdkLayout.ensure(filesDirectory, logger);
+        File androidSdk = AndroidSdkLayout.ensure(filesDirectory, project, logger);
         if (androidSdk == null) {
             logger.onInfo("No platform jar found under " + sdk + "/platforms, so sdk.dir is not set for this build.");
             logger.onWarning("The Android SDK files are not installed on this device.");
