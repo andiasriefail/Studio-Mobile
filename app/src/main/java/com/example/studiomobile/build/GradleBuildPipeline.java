@@ -202,4 +202,51 @@ public final class GradleBuildPipeline implements BuildPipeline {
             return total;
         }
     }
+
+    public static boolean isGradleProject(File project) {
+        if (project == null || !project.isDirectory()) return false;
+        return new File(project, "settings.gradle").isFile() || new File(project, "settings.gradle.kts").isFile()
+            || new File(project, "build.gradle").isFile() || new File(project, "build.gradle.kts").isFile();
+    }
+
+    private GradleRuntimeManager runtimeManager() {
+        if (runtimeManager == null) {
+            BuildToolCatalog catalog = null;
+            try { catalog = BuildToolCatalog.readVerified(context.getAssets().open("build-tools/catalog.json"), BuildToolCatalog.BUNDLED_CATALOG_SHA256); }
+            catch (Exception ignored) { /* no trusted catalog: detection still works, automatic install is disabled */ }
+            String javaHome = System.getenv("JAVA_HOME");
+            runtimeManager = new GradleRuntimeManager(context.getFilesDir(), catalog, java.util.Arrays.asList(Build.SUPPORTED_ABIS),
+                javaHome == null ? null : new File(javaHome), context.getAssets());
+        }
+        return runtimeManager;
+    }
+
+    private static File findApk(File project) {
+        List<File> apks = new ArrayList<>();
+        collectApks(new File(project, "app/build/outputs/apk"), apks);
+        if (apks.isEmpty()) collectApks(new File(project, "build/outputs/apk"), apks);
+        if (apks.isEmpty()) return null;
+        Collections.sort(apks, new Comparator<File>() {
+            @Override public int compare(File left, File right) { return Long.compare(right.lastModified(), left.lastModified()); }
+        });
+        for (File apk : apks) if (apk.isFile() && apk.length() > 0) return apk;
+        return null;
+    }
+    private static void collectApks(File directory, List<File> output) {
+        File[] children = directory.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            if (child.isDirectory()) collectApks(child, output);
+            else if (child.isFile() && child.getName().toLowerCase(java.util.Locale.ROOT).endsWith(".apk")) output.add(child);
+        }
+    }
+    private static boolean copy(File source, File target) {
+        try (java.io.InputStream in = new java.io.FileInputStream(source); java.io.OutputStream out = new java.io.FileOutputStream(target)) {
+            byte[] buffer = new byte[32768]; int count;
+            while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
+            out.flush(); return target.isFile() && target.length() == source.length() && target.length() > 0;
+        } catch (Exception ignored) { return false; }
+    }
+    private static BuildResult failed(String message) { return new BuildResult(BuildResult.Status.FAILED, null, message); }
+    @Override public void cancel() { cancelled = true; GradleRuntimeManager manager = runtimeManager; if (manager != null) manager.cancel(); Process process = activeProcess; if (process != null) process.destroy(); }
 }
