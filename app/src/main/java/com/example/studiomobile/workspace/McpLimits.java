@@ -60,9 +60,9 @@ public final class McpLimits {
         text.append("- Manifest merging copies library elements but does not support tools:node or tools:replace.\n");
         text.append("- Studio Mobile never generates MainActivity, layouts or sample code. Empty projects stay empty.\n\n");
 
-        text.append("LANGUAGE SUPPORT (read this before you touch Python, Dart, C or C++)\n");
+        text.append("LANGUAGE SUPPORT BY DEVICE (read this before you touch Python, Dart, C or C++)\n");
         text.append("- Java and Kotlin build the app itself (screens, logic, resources) and work on every phone. JavaScript runs on Rhino (ES6, no import/export modules).\n");
-        text.append("- Python, Dart and C/C++ compiled on the phone exist ONLY for arm64-v8a phones. ")
+        text.append("- Python (CPython), Dart and C/C++ compiled on the phone (NDK clang) exist ONLY for arm64-v8a phones. ")
             .append("They do NOT work on 32-bit ARM phones (armeabi-v7a), on x86 phones, or on x86_64 phones that cannot run arm64 code.\n");
         text.append("- What each one is for:\n");
         text.append("  * Python (CPython): runs single .py scripts inside Studio Mobile, for tools, automation and data work. ")
