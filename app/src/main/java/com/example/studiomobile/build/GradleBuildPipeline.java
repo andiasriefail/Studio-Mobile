@@ -40,7 +40,8 @@ public final class GradleBuildPipeline implements BuildPipeline {
         if (levelProblem != null) return failed(levelProblem);
         File output = configuration.getOutputDirectory();
         if (!output.exists() && !output.mkdirs()) return failed("Could not create APK output directory: " + output);
-        GradleRuntimeManager.Resolution resolution = runtimeManager().resolve(project, configuration.isOfflineMode(), logger);
+        logger.onInfo("[step] Checking the build tools");
+        GradleRuntimeManager.Resolution resolution = runtimeManager().resolve(project, configuration.isOfflineMode(), new ScreenLogger(logger));
         if (cancelled) return new BuildResult(BuildResult.Status.CANCELLED, null, "Gradle build cancelled.");
         if (!resolution.isUsable()) return failed(resolution.error);
         GradleRuntime runtime = resolution.runtime;
@@ -55,7 +56,11 @@ public final class GradleBuildPipeline implements BuildPipeline {
         logger.onInfo(configuration.isOfflineMode()
             ? "Dependency resolution: offline; all required plugins and artifacts must already be cached."
             : "Dependency resolution: online; Gradle may download required plugins and libraries into the persistent cache.");
+        final BuildLogger screenLog = logger;
+        DownloadWatcher watcher = new DownloadWatcher(runtime.getGradleUserHome(), screenLog);
         try {
+            logger.onInfo("[step] Starting the build engine");
+            watcher.start();
             BuildProcessRunner runner = new BuildProcessRunner(new BuildProcessRunner.ProcessObserver() {
                 @Override public void onStarted(Process process) { activeProcess = process; }
                 @Override public void onFinished(Process process) { if (activeProcess == process) activeProcess = null; }
@@ -80,7 +85,63 @@ public final class GradleBuildPipeline implements BuildPipeline {
         } catch (Exception exception) {
             logger.onError("Gradle execution error: " + exception.getClass().getSimpleName() + ": " + exception.getMessage(), exception);
             return failed("Could not run Gradle: " + exception.getMessage());
-        } finally { activeProcess = null; }
+        } finally { activeProcess = null; watcher.finish(); }
+    }
+
+    /**
+     * Wraps the logger while the toolchain is prepared. The raw lines (paths, licences, checksums) go to the full log tagged as
+     * internal, so they never show on the screen; a short plain-words step is written beside them. Warnings and errors pass unchanged.
+     */
+    private static final class ScreenLogger implements BuildLogger {
+        private final BuildLogger delegate;
+        ScreenLogger(BuildLogger delegate) { this.delegate = delegate; }
+        @Override public void onInfo(String message) {
+            if (message == null) return;
+            delegate.onInfo("[internal] " + message);
+            String friendly = friendly(message);
+            if (friendly != null) delegate.onInfo(friendly);
+        }
+        @Override public void onWarning(String message) { delegate.onWarning(message); }
+        @Override public void onError(String message, Throwable cause) { delegate.onError(message, cause); }
+        private static String friendly(String message) {
+            if (message.startsWith("Project requirements")) return "[step] Reading the project requirements";
+            if (message.startsWith("Unpacking bundled")) return "[step] Installing the build tools";
+            if (message.startsWith("Downloading ")) return "[step] Downloading the build tools";
+            if (message.contains(" MiB downloaded")) return "[progress] Downloading the build tools · " + message.substring(message.lastIndexOf(": ") + 2).replace(" downloaded", "");
+            if (message.startsWith("Ready:")) return "[step] Build tools ready";
+            if (message.startsWith("java launcher self-test passed")) return "[step] Verifying the build tools";
+            if (message.startsWith("Dependency preflight")) return "[step] Checking cached libraries";
+            return null;
+        }
+    }
+
+    /** Watches the Gradle dependency cache while Gradle runs and reports real download activity (Gradle itself prints nothing for it). */
+    private static final class DownloadWatcher extends Thread {
+        private final File modules; private final BuildLogger logger; private volatile boolean stopped;
+        DownloadWatcher(File gradleUserHome, BuildLogger logger) { super("GradleDownloadWatcher"); setDaemon(true); this.modules = new File(gradleUserHome, "caches/modules-2"); this.logger = logger; }
+        void finish() { stopped = true; interrupt(); }
+        @Override public void run() {
+            long base = size(modules), last = base, reported = base; int quiet = 0; boolean active = false;
+            while (!stopped) {
+                try { Thread.sleep(4000); } catch (InterruptedException interrupted) { return; }
+                long now = size(modules);
+                if (now > last) {
+                    quiet = 0;
+                    if (!active) { active = true; logger.onInfo("[step] Downloading libraries"); }
+                    if (now - reported >= 256 * 1024) { reported = now; logger.onInfo("[progress] Downloading libraries · " + megabytes(now - base) + " so far"); }
+                } else if (++quiet >= 2) active = false;
+                last = now;
+            }
+        }
+        private static String megabytes(long bytes) { return String.format(java.util.Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0)); }
+        private static long size(File file) {
+            if (file.isFile()) return file.length();
+            File[] children = file.listFiles();
+            if (children == null) return 0;
+            long total = 0;
+            for (File child : children) total += size(child);
+            return total;
+        }
     }
 
     public static boolean isGradleProject(File project) {
