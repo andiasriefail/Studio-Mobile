@@ -1,0 +1,79 @@
+<resources>
+    <style name="AppTheme" parent="Theme.MaterialComponents.Light.NoActionBar">
+        <item name="colorPrimary">@color/cosmic_primary</item>
+        <item name="colorPrimaryVariant">@color/cosmic_primary_dark</item>
+        <item name="colorSecondary">@color/cosmic_pink</item>
+        <item name="colorSurface">@color/cosmic_surface</item>
+        <item name="android:colorAccent">@color/cosmic_primary</item>
+        <item name="android:windowBackground">@color/cosmic_white</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowLightStatusBar">false</item>
+        <item name="android:windowSoftInputMode">adjustResize</item>
+        <item name="bottomSheetDialogTheme">@style/CosmicBottomSheetDialog</item>
+    </style>
+    <style name="CosmicBottomSheetDialog" parent="ThemeOverlay.MaterialComponents.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/CosmicBottomSheet</item>
+    </style>
+    <style name="CosmicBottomSheet" parent="Widget.MaterialComponents.BottomSheet.Modal">
+        <item name="android:background">@android:color/transparent</item>
+    </style>
+
+    <style name="Cosmic.Title" parent="">
+        <item name="android:textColor">@color/cosmic_ink</item>
+        <item name="android:textSize">22sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+    </style>
+    <style name="Cosmic.Muted" parent="">
+        <item name="android:textColor">@color/cosmic_muted</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+    <style name="Cosmic.Button" parent="">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_height">56dp</item>
+        <item name="android:layout_weight">1</item>
+        <item name="android:gravity">center</item>
+        <item name="android:textSize">16sp</item>
+        <item name="android:fontFamily">sans-serif-medium</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:foreground">?attr/selectableItemBackground</item>
+    </style>
+    <style name="Cosmic.Button.Primary">
+        <item name="android:background">@drawable/bg_button_primary</item>
+        <item name="android:textColor">@android:color/white</item>
+    </style>
+    <style name="Cosmic.Button.Outline">
+        <item name="android:background">@drawable/bg_button_outline</item>
+        <item name="android:textColor">@color/cosmic_primary_dark</item>
+    </style>
+    <style name="Cosmic.Input" parent="">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">56dp</item>
+        <item name="android:background">@drawable/bg_input</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+        <item name="android:singleLine">true</item>
+        <item name="android:textColor">@color/cosmic_ink</item>
+        <item name="android:textColorHint">#A39BC8</item>
+        <item name="android:textSize">17sp</item>
+    </style>
+    <style name="Cosmic.Stepper" parent="">
+        <item name="android:layout_width">56dp</item>
+        <item name="android:layout_height">56dp</item>
+        <item name="android:background">@drawable/bg_button_tonal</item>
+        <item name="android:padding">16dp</item>
+        <item name="android:tint">@color/cosmic_primary_dark</item>
+        <item name="android:foreground">?attr/selectableItemBackground</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+    </style>
+    <style name="Cosmic.IconButton" parent="">
+        <item name="android:layout_width">48dp</item>
+        <item name="android:layout_height">48dp</item>
+        <item name="android:padding">12dp</item>
+        <item name="android:clickable">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:background">?attr/selectableItemBackgroundBorderless</item>
+    </style>
+</resources>

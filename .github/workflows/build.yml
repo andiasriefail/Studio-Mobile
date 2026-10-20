@@ -1,0 +1,284 @@
+name: Build Studio Mobile APK
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
+      - name: Install Android platforms
+        run: |
+          # Android 17 is published as platforms;android-37.0 (API level 37)
+          sdkmanager "platforms;android-37.0" "build-tools;36.0.0" "platform-tools"
+          # Gradle (compileSdk = 37) looks for platforms/android-37; sdkmanager may install it as android-37.0
+          if [ ! -d "$ANDROID_HOME/platforms/android-37" ] && [ -d "$ANDROID_HOME/platforms/android-37.0" ]; then
+            ln -s "$ANDROID_HOME/platforms/android-37.0" "$ANDROID_HOME/platforms/android-37"
+          fi
+          ls "$ANDROID_HOME/platforms"
+      - name: Bundle android.jar into the app
+        run: |
+          # API 37: the folder is android-37.0 (or android-37), so look it up instead of hard-coding it
+          p37=$(ls -d "$ANDROID_HOME"/platforms/android-37* | head -n 1)
+          test -f "$p37/android.jar" || { echo "android.jar for API 37 not found under $ANDROID_HOME/platforms" >&2; exit 1; }
+          cp "$p37/android.jar" "app/src/main/assets/local_libs/android-37.jar"
+          ls -l app/src/main/assets/local_libs/
+      - name: Download AAPT2 (ReVanced v1.1.0, build-tools 35.0.2)
+        run: |
+          set -euo pipefail
+          base=https://github.com/ReVanced/aapt2/releases/download/v1.1.0
+          fetch() {
+            abi="$1"; asset="$2"; expected="$3"
+            dest="app/src/main/jniLibs/$abi/libaapt2.so"
+            mkdir -p "$(dirname "$dest")"
+            curl -fsSL "$base/$asset" -o "$dest"
+            sum=$(sha256sum "$dest" | cut -d' ' -f1)
+            echo "$asset sha256=$sum"
+            [ "$sum" = "$expected" ] || { echo "SHA-256 mismatch for $asset (expected $expected)" >&2; exit 1; }
+          }
+          fetch arm64-v8a aapt2-arm64-v8a 7e5ae2e1f62fc24cab14072555ffd0a1a7e1ce27e82cc1008967b835b6d8df5b
+          fetch armeabi-v7a aapt2-armeabi-v7a 466124dc6a412c39cb970a12ccaf2df054abf6f6e63e78690cd7b6e53263bd86
+          fetch x86 aapt2-x86 52ab9dbdff56f5498dd6bf2c6a0400509330258d6db624d4c7a850314a6df715
+          fetch x86_64 aapt2-x86_64 46d2244c3c574979ecae452c8a32e0a25ac0184bfe29a3d805821e36401ecdcb
+          ls -l app/src/main/jniLibs/*/
+      - name: Download Android NDK r29 (lzhiyong/termux-ndk) and bundle clang + lld
+        run: |
+          set -euo pipefail
+          url=https://github.com/lzhiyong/termux-ndk/releases/download/android-ndk/android-ndk-r29-aarch64.tar.xz
+          expected=02e10e4ddfe8deaeb0bd0cf29d04c981ed5bc8a5d6b560ebb9e7661f472d684b
+          archive="$RUNNER_TEMP/android-ndk-r29-aarch64.tar.xz"
+          curl -fsSL "$url" -o "$archive"
+          sum=$(sha256sum "$archive" | cut -d' ' -f1)
+          echo "android-ndk-r29-aarch64.tar.xz sha256=$sum"
+          [ "$sum" = "$expected" ] || { echo "SHA-256 mismatch for NDK archive (expected $expected)" >&2; exit 1; }
+          ndk_dir="$RUNNER_TEMP/ndk"
+          rm -rf "$ndk_dir"; mkdir -p "$ndk_dir"
+          # '*' must NOT match '/', otherwise python3/bin and lib/**/bin are extracted too and the wrong bin folder is picked below.
+          tar -xJf "$archive" -C "$ndk_dir" --wildcards --no-wildcards-match-slash '*/toolchains/llvm/prebuilt/*/bin/*' || true
+          find_bin() { find "$ndk_dir" -type d -name bin -path '*/toolchains/llvm/prebuilt/*/bin' ! -path '*/prebuilt/*/*/bin' | head -n 1; }
+          bin=$(find_bin)
+          if [ -z "$bin" ] || [ ! -e "$bin/clang" ] || [ ! -e "$bin/ld.lld" ]; then
+            echo "clang/ld.lld not found with the partial extract; extracting the whole archive." >&2
+            tar -xJf "$archive" -C "$ndk_dir"
+            bin=$(find_bin)
+          fi
+          if [ -z "$bin" ] || [ ! -e "$bin/clang" ] || [ ! -e "$bin/ld.lld" ]; then
+            echo "clang or ld.lld not found in the NDK archive. bin folder: ${bin:-<none>}" >&2
+            [ -n "$bin" ] && ls -la "$bin" >&2
+            find "$ndk_dir" -maxdepth 7 \( -name 'clang*' -o -name '*lld*' \) | head -n 40 >&2
+            exit 1
+          fi
+          echo "Using $bin"
+          dest=app/src/main/jniLibs/arm64-v8a
+          mkdir -p "$dest"
+          # Resolve symlinks (clang -> clang-21, ld.lld -> lld) so the real executables are copied.
+          cp "$(readlink -f "$bin/clang")" "$dest/libclang.so"
+          cp "$(readlink -f "$bin/ld.lld")" "$dest/libld.lld.so"
+          chmod 755 "$dest/libclang.so" "$dest/libld.lld.so"
+          file "$dest/libclang.so" "$dest/libld.lld.so"
+          ls -l "$dest"
+      - name: Download Python 3.14.8 (daylight-00/python-build-standalone-android, upstream build) and bundle the interpreter
+        run: |
+          set -euo pipefail
+          url='https://github.com/daylight-00/python-build-standalone-android/releases/download/20261003/cpython-3.14.8%2B20261003-aarch64-linux-android-upstream-install_only.tar.gz'
+          expected=2f5bec7a83d88881dec0e82c8aec3f30610900b2fafd806e2fee26dd132b47de
+          archive="$RUNNER_TEMP/python-android.tar.gz"
+          curl -fsSL "$url" -o "$archive"
+          sum=$(sha256sum "$archive" | cut -d' ' -f1)
+          echo "python archive sha256=$sum"
+          [ "$sum" = "$expected" ] || { echo "SHA-256 mismatch for the Python archive (expected $expected)" >&2; exit 1; }
+          py_dir="$RUNNER_TEMP/python-android"
+          rm -rf "$py_dir"; mkdir -p "$py_dir"
+          tar -xzf "$archive" -C "$py_dir"
+          exe=$(find "$py_dir" -path '*/bin/python3' | head -n 1)
+          if [ -z "$exe" ]; then
+            echo "bin/python3 not found. Layout:" >&2
+            find "$py_dir" -maxdepth 3 | head -n 60 >&2
+            exit 1
+          fi
+          root=$(dirname "$(dirname "$exe")")
+          dest=app/src/main/jniLibs/arm64-v8a
+          mkdir -p "$dest"
+          # Android 10+ only executes files from the native library directory, so the interpreter ships as lib<name>.so.
+          cp "$(readlink -f "$exe")" "$dest/libpythonexe.so"
+          chmod 755 "$dest/libpythonexe.so"
+          echo "Interpreter dependencies:"
+          readelf -d "$dest/libpythonexe.so" | grep NEEDED || true
+          # Bundle every dependency that lives inside the Python tree (libpython3.14.so, ...) next to it.
+          for needed in $(readelf -d "$dest/libpythonexe.so" | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p'); do
+            found=$(find "$root/lib" -maxdepth 1 -name "$needed" | head -n 1)
+            [ -n "$found" ] || continue
+            case "$needed" in *.so) ;; *) echo "Dependency $needed does not end in .so and cannot be packaged under jniLibs" >&2; exit 1;; esac
+            cp "$(readlink -f "$found")" "$dest/$needed"
+            echo "bundled $needed"
+          done
+          file "$dest/libpythonexe.so"
+          ls -l "$dest"
+      - name: Cache the Dart SDK archive
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/dart-sdk-cache
+          key: dart-sdk-${{ hashFiles('tools/dart-sdk.json') }}
+      - name: Bundle the Dart runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(python3 -c "import json; print(json.load(open('tools/dart-sdk.json'))['version'])")
+          expected=$(python3 -c "import json; print(json.load(open('tools/dart-sdk.json'))['sha256'])")
+          # The Dart SDK is built and released by a separate repository (tools/dart-sdk.json, entry "repo").
+          dart_repo=$(python3 -c "import json; print(json.load(open('tools/dart-sdk.json'))['repo'])")
+          tag="dart-android-arm64-$version"
+          name="dart-sdk-android-arm64-$version.tar.gz"
+          cache="$RUNNER_TEMP/dart-sdk-cache"
+          mkdir -p "$cache"
+          if [ -f "$cache/$name" ]; then
+            echo "Using the cached $name"
+          else
+            gh release download "$tag" --pattern "$name" --dir "$cache" --repo "$dart_repo"
+          fi
+          # The checksum is verified every time, so a damaged or outdated cache entry can never be used.
+          sum=$(sha256sum "$cache/$name" | cut -d' ' -f1)
+          [ "$sum" = "$expected" ] || { rm -f "$cache/$name"; echo "SHA-256 mismatch for $name from $dart_repo: $sum (tools/dart-sdk.json expects $expected)" >&2; exit 1; }
+          dart_dir="$RUNNER_TEMP/dart-runtime"
+          rm -rf "$dart_dir"; mkdir -p "$dart_dir"
+          tar -xzf "$cache/$name" -C "$dart_dir" dart-sdk/bin/dartaotruntime dart-sdk/bin/dartvm
+          dest=app/src/main/jniLibs/arm64-v8a
+          mkdir -p "$dest"
+          cp "$dart_dir/dart-sdk/bin/dartaotruntime" "$dest/libdartaotruntime.so"
+          cp "$dart_dir/dart-sdk/bin/dartvm" "$dest/libdartvm.so"
+          chmod 755 "$dest/libdartaotruntime.so" "$dest/libdartvm.so"
+          file "$dest/libdartaotruntime.so" "$dest/libdartvm.so"
+          python3 tools/pin_dart_catalog.py
+      - name: Bundle the java launcher (fork JRE release) and register the JDK + Gradle in the catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          jdk_repo=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['repo'])")
+          # OWNER is the placeholder in tools/gradle-jdk.json; by default the JRE fork lives next to this repository.
+          if [ "${jdk_repo%%/*}" = "OWNER" ]; then jdk_repo="${GITHUB_REPOSITORY_OWNER}/${jdk_repo#*/}"; fi
+          tag=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['tag'])")
+          export JDK_REPO="$jdk_repo"
+          resolved="$RUNNER_TEMP/gradle-jdk-resolved.json"
+          python3 - "$resolved" <<'PY'
+          import json, sys
+          json.dump({"jdk": {}, "gradle": {}}, open(sys.argv[1], "w"))
+          PY
+          record() { python3 - "$resolved" "$@" <<'PY'
+          import json, sys
+          path, kind, key, sha, size = sys.argv[1:6]
+          data = json.load(open(path))
+          if kind == "jdk": data["jdk"][key] = {"sha256": sha, "bytes": int(size)}
+          else: data["gradle"] = {"sha256": sha, "bytes": int(size)}
+          json.dump(data, open(path, "w"))
+          PY
+          }
+          mkdir -p "$RUNNER_TEMP/jre"
+          bundle_abi() {
+            abi="$1"; asset="$2"; machine="$3"
+            if ! gh release download "$tag" --repo "$jdk_repo" --pattern "$asset" --pattern "$asset.sha256" --dir "$RUNNER_TEMP/jre" --clobber; then
+              echo "::warning::$asset is not in release $tag of $jdk_repo; $abi gets no on-device JDK."; return 0
+            fi
+            expected=$(cut -d' ' -f1 "$RUNNER_TEMP/jre/$asset.sha256")
+            sum=$(sha256sum "$RUNNER_TEMP/jre/$asset" | cut -d' ' -f1)
+            [ "$sum" = "$expected" ] || { echo "SHA-256 mismatch for $asset ($sum, release says $expected)" >&2; exit 1; }
+            dest="app/src/main/jniLibs/$abi"
+            mkdir -p "$dest"
+            tar -xJf "$RUNNER_TEMP/jre/$asset" -C "$RUNNER_TEMP/jre" "jre-21/bin/java"
+            cp "$RUNNER_TEMP/jre/jre-21/bin/java" "$dest/libjavaexe.so"
+            chmod 755 "$dest/libjavaexe.so"
+            readelf -h "$dest/libjavaexe.so" | grep -q "Machine:.*$machine" || { echo "libjavaexe.so for $abi is not a $machine binary" >&2; exit 1; }
+            echo "launcher for $abi:"; readelf -d "$dest/libjavaexe.so" | grep -E 'NEEDED|RUNPATH' || true
+            record jdk "$abi" "$sum" "$(stat -c %s "$RUNNER_TEMP/jre/$asset")"
+          }
+          bundle_abi arm64-v8a "$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['assets']['arm64-v8a'])")" AArch64
+          bundle_abi armeabi-v7a "$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['assets']['armeabi-v7a'])")" ARM
+          # Gradle distribution: verify against the checksum Gradle publishes, then pin it in the catalog.
+          gurl=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['gradle']['url'])")
+          gsha=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['gradle']['sha256_url'])")
+          curl -fsSL "$gurl" -o "$RUNNER_TEMP/gradle.zip"
+          expected=$(curl -fsSL "$gsha" | tr -d '[:space:]')
+          sum=$(sha256sum "$RUNNER_TEMP/gradle.zip" | cut -d' ' -f1)
+          [ "$sum" = "$expected" ] || { echo "SHA-256 mismatch for the Gradle distribution ($sum, published $expected)" >&2; exit 1; }
+          record gradle - "$sum" "$(stat -c %s "$RUNNER_TEMP/gradle.zip")"
+          cat "$resolved"; echo
+          python3 tools/pin_gradle_jdk_catalog.py "$resolved"
+      - name: Build the JSX/TypeScript transpiler (Sucrase, bundled for QuickJS)
+        run: |
+          set -euo pipefail
+          sucrase=$(python3 -c "import json; print(json.load(open('tools/web-tools.json'))['sucrase'])")
+          esbuild=$(python3 -c "import json; print(json.load(open('tools/web-tools.json'))['esbuild'])")
+          out="$GITHUB_WORKSPACE/app/src/main/assets/build-tools/web"
+          work="$RUNNER_TEMP/sucrase-build"
+          rm -rf "$work"; mkdir -p "$work" "$out"
+          cd "$work"
+          npm init -y > /dev/null
+          npm install --no-audit --no-fund --save-exact "sucrase@$sucrase" "esbuild@$esbuild"
+          printf 'export { transform } from "sucrase";\n' > entry.mjs
+          npx esbuild entry.mjs --bundle --format=iife --global-name=Sucrase --platform=browser --target=es2019 --minify --outfile="$out/sucrase.js"
+          node "$GITHUB_WORKSPACE/tools/sucrase-smoke.js" "$out/sucrase.js"
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '9.8.1'
+          cache-disabled: false
+          cache-read-only: false
+      - name: Choose Gradle command
+        run: |
+          if [ -f gradle/wrapper/gradle-wrapper.jar ]; then
+            chmod +x ./gradlew
+            echo "GRADLE_CMD=./gradlew" >> "$GITHUB_ENV"
+          else
+            echo "GRADLE_CMD=gradle" >> "$GITHUB_ENV"
+          fi
+      - name: Run unit tests
+        run: $GRADLE_CMD --no-daemon --info test
+      - name: Build debug APK
+        run: $GRADLE_CMD --no-daemon --info assembleDebug
+      - name: Verify the native libraries in the APK (QuickJS must exist for 32-bit and 64-bit)
+        run: |
+          set -euo pipefail
+          apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)
+          echo "APK: $apk"
+          echo "---- native libraries per ABI ----"
+          unzip -l "$apk" | awk '{print $4}' | grep -E '^lib/[^/]+/.+\.so$' | sort
+          for abi in armeabi-v7a arm64-v8a; do
+            if ! unzip -l "$apk" | awk '{print $4}' | grep -E "^lib/$abi/libjavaexe\\.so$" > /dev/null; then
+              echo "::warning::libjavaexe.so is missing for $abi: Gradle projects cannot be built on those phones."
+            fi
+            if ! unzip -l "$apk" | awk '{print $4}' | grep -E "^lib/$abi/.*quickjs.*\.so$" > /dev/null; then
+              echo "::error::The QuickJS library is missing for $abi, so JSX/TypeScript builds would crash on those phones."
+              exit 1
+            fi
+          done
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: studio-mobile-test-reports
+          path: app/build/reports/tests/
+          if-no-files-found: ignore
+          retention-days: 1
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: studio-mobile-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
