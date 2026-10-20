@@ -50,6 +50,8 @@ public final class GradleBuildPipeline implements BuildPipeline {
             ? "Gradle is started through the packaged java launcher (" + runtime.getJavaLauncher().getAbsolutePath() + ") with JDK " + runtime.getJavaMajor() + " at " + runtime.getJavaHome()
             : "Gradle executable (shell script): " + runtime.getGradleExecutable().getAbsolutePath());
         logger.onInfo("Gradle user home (dependency cache): " + runtime.getGradleUserHome().getAbsolutePath());
+        if (!runtime.ensureAndroidUserHome()) return failed("Could not create the Android user home directory: " + runtime.getAndroidUserHome());
+        logger.onInfo("Android user home (replaces the unwritable /data/.android): " + runtime.getAndroidUserHome().getAbsolutePath());
         logger.onInfo(configuration.isOfflineMode()
             ? "Dependency resolution: offline; all required plugins and artifacts must already be cached."
             : "Dependency resolution: online; Gradle may download required plugins and libraries into the persistent cache.");
