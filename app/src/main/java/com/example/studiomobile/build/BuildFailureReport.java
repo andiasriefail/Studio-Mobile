@@ -55,6 +55,12 @@ public final class BuildFailureReport {
                 if (diagnostic.contains("outofmemoryerror") || diagnostic.contains("failed to allocate")) {
                     writer.write("Memory pressure detected. Close other apps and reduce dependency size; large downloads should be streamed and installed atomically rather than duplicated in memory.\n");
                 }
+                if (diagnostic.contains("/data/.android") || diagnostic.contains("accessdeniedexception")) {
+                    writer.write("Access denied while Gradle/AGP used the default user home (~/.android). Studio Mobile now sets ANDROID_USER_HOME and user.home to app-private storage; if this still appears, check the 'Android user home' line near the top of the log.\n");
+                }
+                if (diagnostic.contains("checksum") || diagnostic.contains("could not read")) {
+                    writer.write("Possible corrupted Gradle dependency cache. Clear the Gradle dependency cache and rebuild online.\n");
+                }
                 writer.write("\nNote: review this report before sharing it; compiler output may contain project paths.\n");
             }
             return report.isFile() && report.length() > 0 ? report : null;
