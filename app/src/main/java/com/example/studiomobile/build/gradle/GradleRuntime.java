@@ -81,7 +81,6 @@ public final class GradleRuntime {
         if (androidSdk != null) { env.put("ANDROID_HOME", androidSdk.getAbsolutePath()); env.put("ANDROID_SDK_ROOT", androidSdk.getAbsolutePath()); }
         File androidUserHome = getAndroidUserHome();
         env.put("ANDROID_USER_HOME", androidUserHome.getAbsolutePath());
-        env.put("ANDROID_PREFS_ROOT", androidUserHome.getAbsolutePath());
         env.put("HOME", androidUserHome.getParentFile() != null ? androidUserHome.getParentFile().getAbsolutePath() : androidUserHome.getAbsolutePath());
         env.put("GRADLE_OPTS", "-Dfile.encoding=UTF-8 -Duser.home=" + androidUserHome.getParentFile().getAbsolutePath());
         if (javaLauncher != null) {
