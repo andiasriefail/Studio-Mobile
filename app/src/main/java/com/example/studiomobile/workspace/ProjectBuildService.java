@@ -318,6 +318,8 @@ public final class ProjectBuildService {
     private void run(File project, boolean bundle) {
         State finalState = State.FAILED;
         File copiedProject = null;
+        Throwable crash = null;
+        String failureStage = "BUILD";
         try {
             appendDetail(LanguageUi.BUILD_TOOLCHAIN + "\n" + LocalLibsInstaller.install(appContext));   // internal: stays out of the screen log
             File buildRoot = new File(appContext.getCacheDir(), "user-project-build");
@@ -341,6 +343,7 @@ public final class ProjectBuildService {
             BuildConfiguration configuration = new BuildConfiguration(buildRoot, apkOutput, !hasBuildFiles, bundle);
             BuildPipeline pipeline = useGradle ? new GradleBuildPipeline(appContext) : new LocalBuildPipeline(appContext);
             activePipeline = pipeline;
+            failureStage = useGradle ? "GRADLE BUILD" : "LOCAL BUILD";
 
             BuildLogger logger = new BuildLogger() {
                 @Override public void onInfo(String message) { appendInfo(message); }
@@ -386,12 +389,14 @@ public final class ProjectBuildService {
         } catch (Throwable error) {
             // Throwable, not Exception: compiler engines can fail with OutOfMemoryError or
             // NoClassDefFoundError on a device, and the state must never stay stuck on RUNNING.
+            crash = error;
             lastMessage = String.valueOf(error.getMessage());
             java.io.StringWriter stackText = new java.io.StringWriter();
             error.printStackTrace(new java.io.PrintWriter(stackText));
             appendShown("ERROR: Build stopped by " + error.getClass().getName() + ": " + error.getMessage() + "\n" + stackText);
         } finally {
             activePipeline = null;
+            if (finalState == State.FAILED) saveFailureReport(failureStage, crash);   // every failed build lands in Studio Mobile/Build Error Logs
             long endedAt = System.currentTimeMillis();
             finishedAtMillis = endedAt;
             showOnly("Total build time: " + clock(endedAt - startedAtMillis));   // the whole build, from the first step to the result
@@ -403,6 +408,16 @@ public final class ProjectBuildService {
             // The copy of the project is only needed while building; removing it here keeps the app's cache from growing with every build.
             if (copiedProject != null) com.example.studiomobile.build.BuildCacheCleaner.deleteTree(copiedProject);
         }
+    }
+
+    /** Writes the full log of a failed build to Studio Mobile/Build Error Logs (only the latest is kept). Never throws. */
+    private void saveFailureReport(String stage, Throwable crash) {
+        try {
+            String detail = lastMessage == null || lastMessage.isEmpty() ? "Build failed." : lastMessage;
+            File report = com.example.studiomobile.build.BuildFailureReport.write(StudioStorage.errorLogsDir(appContext), stage, crash, detail, getLog());
+            if (report != null) appendShown("Full diagnostic report saved to: " + report.getAbsolutePath());
+            else appendShown("WARNING: Could not save the diagnostic report to Build Error Logs.");
+        } catch (Throwable ignored) { /* diagnostics must never hide the real build failure */ }
     }
 
     /** Reads the app_name string of the project; falls back to the project folder name. The result is safe as a file name. */
