@@ -1,0 +1,16 @@
+{
+  "jdk": {
+    "major": 21,
+    "repo": "vhynlain/nlauncher-jre-android",
+    "tag": "jre21-21.0.12.8-nl2",
+    "assets": {
+      "arm64-v8a": "jre21-android-arm64.tar.xz",
+      "armeabi-v7a": "jre21-android-arm.tar.xz"
+    }
+  },
+  "gradle": {
+    "version": "9.8.1",
+    "url": "https://services.gradle.org/distributions/gradle-9.8.1-bin.zip",
+    "sha256_url": "https://services.gradle.org/distributions/gradle-9.8.1-bin.zip.sha256"
+  }
+}

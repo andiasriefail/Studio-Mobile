@@ -1,0 +1,29 @@
+{
+  "schema": "studio-mobile-build-catalog-v1",
+  "catalogVersion": 3,
+  "status": "partial",
+  "components": [
+    {
+      "id": "ndk-r29",
+      "version": "r29 (29.0.14206865, clang 21.0.0)",
+      "url": "https://github.com/lzhiyong/termux-ndk/releases/download/android-ndk/android-ndk-r29-aarch64.tar.xz",
+      "installPath": "ndk-r29-aarch64.tar.xz",
+      "sha256": "02e10e4ddfe8deaeb0bd0cf29d04c981ed5bc8a5d6b560ebb9e7661f472d684b",
+      "license": "Apache-2.0 WITH LLVM-exception (Android NDK / LLVM)",
+      "abi": "arm64-v8a",
+      "archive": "tar.xz",
+      "maxBytes": 471859200
+    },
+    {
+      "id": "python-3.14.8",
+      "version": "3.14.8 (python-build-standalone-android 20261003, upstream)",
+      "url": "https://github.com/daylight-00/python-build-standalone-android/releases/download/20261003/cpython-3.14.8%2B20261003-aarch64-linux-android-upstream-install_only.tar.gz",
+      "installPath": "python-3.14.8-aarch64-android.tar.gz",
+      "sha256": "2f5bec7a83d88881dec0e82c8aec3f30610900b2fafd806e2fee26dd132b47de",
+      "license": "PSF-2.0 (CPython)",
+      "abi": "arm64-v8a",
+      "archive": "tar.gz",
+      "maxBytes": 100663296
+    }
+  ]
+}

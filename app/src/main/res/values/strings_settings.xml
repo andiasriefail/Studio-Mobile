@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="settings_title">Settings</string>
+    <string name="settings_wallpaper_title">Change Wallpaper</string>
+    <string name="settings_wallpaper_desc">Use your own picture behind the code editor.</string>
+    <string name="wallpaper_title">Change Wallpaper</string>
+    <string name="wallpaper_none">No wallpaper selected</string>
+    <string name="wallpaper_choose">Choose image</string>
+    <string name="wallpaper_remove">Remove</string>
+    <string name="wallpaper_dim">Darkness: %1$d%%</string>
+    <string name="wallpaper_dim_hint">Higher values make code easier to read on bright pictures.</string>
+    <string name="wallpaper_sample">public class MainActivity {\n    void onCreate() {\n        // your code here\n    }\n}</string>
+    <string name="wallpaper_saved">Wallpaper updated</string>
+    <string name="wallpaper_removed">Wallpaper removed</string>
+    <string name="wallpaper_failed">Could not use the selected image</string>
+</resources>
