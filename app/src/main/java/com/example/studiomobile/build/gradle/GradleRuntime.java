@@ -55,6 +55,21 @@ public final class GradleRuntime {
     public File getJavaHome() { return javaHome; }
     public int getJavaMajor() { return javaMajor; }
     public File getGradleUserHome() { return gradleUserHome; }
+
+    /**
+     * Writable replacement for ~/.android. On Android the JVM reports user.home as "/data" (not writable), so the Android Gradle
+     * Plugin failed with AccessDeniedException: /data/.android while applying 'com.android.application'.
+     */
+    public File getAndroidUserHome() {
+        File parent = gradleUserHome.getParentFile();
+        return new File(parent != null ? parent : gradleUserHome, "android-home");
+    }
+
+    /** Creates the Android user home (debug keystore, prefs, analytics) before Gradle starts. */
+    public boolean ensureAndroidUserHome() {
+        File home = getAndroidUserHome();
+        return home.isDirectory() || home.mkdirs();
+    }
     public File getAndroidSdk() { return androidSdk; }
     public boolean isProjectWrapper() { return projectWrapper; }
 
@@ -64,7 +79,11 @@ public final class GradleRuntime {
         env.put("JAVA_HOME", javaHome.getAbsolutePath());
         env.put("GRADLE_USER_HOME", gradleUserHome.getAbsolutePath());
         if (androidSdk != null) { env.put("ANDROID_HOME", androidSdk.getAbsolutePath()); env.put("ANDROID_SDK_ROOT", androidSdk.getAbsolutePath()); }
-        env.put("GRADLE_OPTS", "-Dfile.encoding=UTF-8");
+        File androidUserHome = getAndroidUserHome();
+        env.put("ANDROID_USER_HOME", androidUserHome.getAbsolutePath());
+        env.put("ANDROID_PREFS_ROOT", androidUserHome.getAbsolutePath());
+        env.put("HOME", androidUserHome.getParentFile() != null ? androidUserHome.getParentFile().getAbsolutePath() : androidUserHome.getAbsolutePath());
+        env.put("GRADLE_OPTS", "-Dfile.encoding=UTF-8 -Duser.home=" + androidUserHome.getParentFile().getAbsolutePath());
         if (javaLauncher != null) {
             // The launcher lives in the native library directory, so it cannot find the JDK relative to itself.
             env.put("NLAUNCHER_JAVA_HOME", javaHome.getAbsolutePath());
@@ -73,7 +92,7 @@ public final class GradleRuntime {
             // Android 10+ cannot exec <jdk>/lib/jspawnhelper from app-private storage, so the default POSIX_SPAWN launch mechanism
             // fails with exit code 127 for every child process (uname, the probe JVM, the forked Gradle daemon). FORK does not
             // need the helper. JAVA_TOOL_OPTIONS is inherited by every JVM Gradle starts, so the client, daemon and probes are covered.
-            env.put("JAVA_TOOL_OPTIONS", "-Djdk.lang.Process.launchMechanism=FORK");
+            env.put("JAVA_TOOL_OPTIONS", "-Djdk.lang.Process.launchMechanism=FORK -Duser.home=" + androidUserHome.getParentFile().getAbsolutePath());
         }
         return Collections.unmodifiableMap(env);
     }
@@ -83,6 +102,7 @@ public final class GradleRuntime {
         List<String> args = new ArrayList<>();
         args.add("--no-daemon");
         args.add("--stacktrace");
+        args.add("-Duser.home=" + (getAndroidUserHome().getParentFile() != null ? getAndroidUserHome().getParentFile().getAbsolutePath() : getAndroidUserHome().getAbsolutePath()));
         args.add("--gradle-user-home"); args.add(gradleUserHome.getAbsolutePath());
         args.add("-Dorg.gradle.java.home=" + javaHome.getAbsolutePath());
         // AGP normally downloads a Linux/x86-64 aapt2 from Maven, which cannot run on Android/ARM.
