@@ -68,7 +68,18 @@ public final class GradleRuntime {
     /** Creates the Android user home (debug keystore, prefs, analytics) before Gradle starts. */
     public boolean ensureAndroidUserHome() {
         File home = getAndroidUserHome();
+        File temp = getTempDirectory();
+        if (!temp.isDirectory()) temp.mkdirs();   // a failure here shows up as the build's own temp-file error
         return home.isDirectory() || home.mkdirs();
+    }
+
+    /**
+     * Folder for java.io.tmpdir. The JDK's default, /tmp, does not exist or is not writable for an app, so any build step that creates a
+     * temporary file (AGP's generateDebugGlobalSynthetics, D8, R8) fails with AccessDeniedException: /tmp/... .
+     */
+    public File getTempDirectory() {
+        File parent = gradleUserHome.getParentFile();
+        return new File(parent != null ? parent : gradleUserHome, "tmp");
     }
     public File getAndroidSdk() { return androidSdk; }
     public boolean isProjectWrapper() { return projectWrapper; }
@@ -82,7 +93,9 @@ public final class GradleRuntime {
         File androidUserHome = getAndroidUserHome();
         env.put("ANDROID_USER_HOME", androidUserHome.getAbsolutePath());
         env.put("HOME", androidUserHome.getParentFile() != null ? androidUserHome.getParentFile().getAbsolutePath() : androidUserHome.getAbsolutePath());
-        env.put("GRADLE_OPTS", "-Dfile.encoding=UTF-8 -Duser.home=" + androidUserHome.getParentFile().getAbsolutePath());
+        String tempOption = "-Djava.io.tmpdir=" + getTempDirectory().getAbsolutePath();
+        env.put("TMPDIR", getTempDirectory().getAbsolutePath());
+        env.put("GRADLE_OPTS", "-Dfile.encoding=UTF-8 -Duser.home=" + androidUserHome.getParentFile().getAbsolutePath() + " " + tempOption);
         if (javaLauncher != null) {
             // The launcher lives in the native library directory, so it cannot find the JDK relative to itself.
             env.put("NLAUNCHER_JAVA_HOME", javaHome.getAbsolutePath());
@@ -91,8 +104,8 @@ public final class GradleRuntime {
             // Android 10+ cannot exec <jdk>/lib/jspawnhelper from app-private storage, so the default POSIX_SPAWN launch mechanism
             // fails with exit code 127 for every child process (uname, the probe JVM, the forked Gradle daemon). FORK does not
             // need the helper. JAVA_TOOL_OPTIONS is inherited by every JVM Gradle starts, so the client, daemon and probes are covered.
-            env.put("JAVA_TOOL_OPTIONS", "-Djdk.lang.Process.launchMechanism=FORK -Duser.home=" + androidUserHome.getParentFile().getAbsolutePath());
-        }
+            env.put("JAVA_TOOL_OPTIONS", "-Djdk.lang.Process.launchMechanism=FORK -Duser.home=" + androidUserHome.getParentFile().getAbsolutePath() + " " + tempOption);
+        } else env.put("JAVA_TOOL_OPTIONS", tempOption);
         return Collections.unmodifiableMap(env);
     }
 
