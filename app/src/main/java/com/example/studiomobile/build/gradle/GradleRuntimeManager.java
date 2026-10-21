@@ -61,6 +61,13 @@ public final class GradleRuntimeManager {
             File home = provisioner.install(id, new File(filesDirectory, "gradle-runtime/gradle-" + need.getRequiredGradleVersion()), "bin/gradle", logger);
             if (home != null) install = chooseGradle(need.getRequiredGradleVersion());
         }
+        if (install == null && need.getRequiredGradleVersion() != null) {
+            // The exact Gradle line is neither installed nor in the catalog (the app ships one Gradle, for example 9.x, while the project
+            // asks for 8.13). AGP 8.13 is the first 8.x series that also supports Gradle 9, so a newer installed Gradle may stand in for it.
+            install = chooseNewerMajorGradle(need.getRequiredGradleVersion(), need.getAgpVersion());
+            if (install != null) logger.onWarning("Gradle " + need.getRequiredGradleVersion() + " is not available on this device; the installed Gradle "
+                + install.version + " is used for Android Gradle plugin " + need.getAgpVersion() + ".");
+        }
         if (install != null) {
             gradleExecutable = install.executable; gradleVersion = install.version;
             bootstrapJar = GradleRuntimeLocator.findLauncherJar(install.home); mainClass = "org.gradle.launcher.GradleMain";
@@ -137,6 +144,16 @@ public final class GradleRuntimeManager {
             if (candidate.version == null) { if (required == null && best == null) best = candidate; continue; }
             if (required != null && (candidate.version.getMajor() != required.getMajor() || candidate.version.compareTo(required) < 0)) continue;
             if (best == null || best.version == null || candidate.version.compareTo(best.version) < 0) best = candidate;
+        }
+        return best;
+    }
+    /** Oldest installed Gradle of a newer major version, only for AGP 8.13 or newer (the first 8.x line that supports Gradle 9). */
+    private GradleRuntimeLocator.GradleInstall chooseNewerMajorGradle(GradleVersion required, GradleVersion agp) {
+        if (required == null || agp == null || agp.compareTo(GradleVersion.parse("8.13")) < 0) return null;
+        GradleRuntimeLocator.GradleInstall best = null;
+        for (GradleRuntimeLocator.GradleInstall candidate : locator.findGradleInstalls()) {
+            if (candidate.version == null || candidate.version.getMajor() <= required.getMajor()) continue;
+            if (best == null || candidate.version.compareTo(best.version) < 0) best = candidate;
         }
         return best;
     }

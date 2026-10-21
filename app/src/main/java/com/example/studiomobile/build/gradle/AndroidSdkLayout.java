@@ -21,6 +21,8 @@ import java.util.regex.Pattern;
 public final class AndroidSdkLayout {
     private static final Pattern PLATFORM = Pattern.compile("android-(\\d+)");
     private static final Pattern NEEDS_PLATFORM = Pattern.compile("platforms;android-(\\d+)");
+    /** AGP's own wording when no platform folder matches compileSdk: "Failed to find target with hash string 'android-36' in: ...". */
+    private static final Pattern NEEDS_TARGET = Pattern.compile("Failed to find target with hash string 'android-(\\d+)(\\.\\d+)?'");
     private static final Pattern NEEDS_TOOLS = Pattern.compile("build-tools;(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?");
     private static final Pattern COMPILE_SDK_RELEASE = Pattern.compile("compileSdk\\s*\\{[^}]*?release\\(\\s*(\\d+)");
     private static final Pattern COMPILE_SDK = Pattern.compile("compileSdk(?:Version)?\\s*=?\\s*(\\d+)");
@@ -75,6 +77,13 @@ public final class AndroidSdkLayout {
             int api = Integer.parseInt(platform.group(1));
             if (seenApis.add(api) && providePlatform(sdk, api, logger)) provided++;
         }
+        Matcher target = NEEDS_TARGET.matcher(gradleOutput);
+        java.util.Set<String> seenTargets = new java.util.HashSet<>();
+        while (target.find()) {
+            int api = Integer.parseInt(target.group(1));
+            String minor = target.group(2) == null ? "" : target.group(2);   // "android-36.1" is its own folder name
+            if (seenTargets.add(api + minor) && providePlatform(sdk, api, minor, logger)) provided++;
+        }
         Matcher tools = NEEDS_TOOLS.matcher(gradleOutput);
         java.util.Set<String> seenTools = new java.util.HashSet<>();
         while (tools.find()) {
@@ -87,8 +96,16 @@ public final class AndroidSdkLayout {
     }
 
     /** True when platforms/android-<api> is usable afterwards. */
-    private static boolean providePlatform(File sdk, int api, BuildLogger logger) {
-        File dir = new File(sdk, "platforms/android-" + api);
+    private static boolean providePlatform(File sdk, int api, BuildLogger logger) { return providePlatform(sdk, api, "", logger); }
+
+    /**
+     * @param minor "" or ".1" for a folder named android-36.1
+     * An installed jar of the same or a newer API is used first. When only older jars exist the newest of them is used anyway, with a
+     * warning: the build then starts instead of stopping at once, and only code that needs the missing newer APIs can fail.
+     */
+    private static boolean providePlatform(File sdk, int api, String minor, BuildLogger logger) {
+        String name = "android-" + api + minor;
+        File dir = new File(sdk, "platforms/" + name);
         File jar = new File(dir, "android.jar");
         if (jar.length() > 0) { writePlatformMetadata(dir, api); return true; }
         int bestApi = 0; File best = null;
@@ -100,13 +117,14 @@ public final class AndroidSdkLayout {
                 if (match.matches() && candidate.length() > 0 && Integer.parseInt(match.group(1)) > bestApi) { bestApi = Integer.parseInt(match.group(1)); best = candidate; }
             }
         }
-        if (best == null || bestApi < api) return false;   // a newer jar can stand in for an older platform, never the other way round
+        if (best == null) { logger.onWarning("Platform " + name + " is needed, but no Android platform jar is installed in Studio Mobile."); return false; }
         try {
             String problem = expose(best.toPath().toRealPath().toFile(), jar);
             if (problem != null) { logger.onInfo(problem); return false; }
-        } catch (IOException exception) { logger.onInfo("Platform android-" + api + " was not prepared (" + exception.getClass().getSimpleName() + ")."); return false; }
+        } catch (IOException exception) { logger.onInfo("Platform " + name + " was not prepared (" + exception.getClass().getSimpleName() + ")."); return false; }
         writePlatformMetadata(dir, api);
-        logger.onInfo("Platform android-" + api + " is served by the installed android-" + bestApi + " jar.");
+        if (bestApi >= api) logger.onInfo("Platform " + name + " is served by the installed android-" + bestApi + " jar.");
+        else logger.onWarning("Platform " + name + " is not installed. The older android-" + bestApi + " jar is used instead; code that needs newer Android APIs will not compile.");
         return true;
     }
 
