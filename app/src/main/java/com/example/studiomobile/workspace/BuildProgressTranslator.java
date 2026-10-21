@@ -56,6 +56,8 @@ final class BuildProgressTranslator {
         {"Compiling Java code", "compiledebugjavawithjavac"},
         {"Converting code to run on Android", "dexbuilderdebug", "mergeextdexdebug", "mergeprojectdexdebug", "mergelibdexdebug", "mergedexdebug"},
         {"Merging native libraries", "mergedebugnativelibs", "stripdebugdebugsymbols"},
+        {"Creating the app bundle", "packagedebugbundle", "builddebugprebundle", ":bundledebug", "mergedebugnativedebugmetadata"},
+        {"Signing the app", "validatesigningdebug", "signdebugbundle", "writedebugsigningconfigversions"},
         {"Assembling the app file", "packagedebug", "createdebugapklistingfileredirect"},
         {"Finishing up", "assembledebug"},
     };
@@ -63,7 +65,7 @@ final class BuildProgressTranslator {
     /** Rules are checked in order, so the more specific (later) stages come first. */
     private static final String[][] RULES = {
         {"3", "packagedebugresources"},
-        {"8", "apk signing", "signing and verification", "app bundle packaging"},
+        {"8", "apk signing", "signing and verification", "app bundle packaging", "packagedebugbundle", "signdebugbundle", ":bundledebug"},
         {"7", "native c/c++ build", "apk packaging", "apk alignment", "packagedebug", "assembledebug"},
         {"6", "dex generation", "code shrinking", "dexbuilder", "mergeprojectdex", "mergeextdex"},
         {"5", "crash check"},

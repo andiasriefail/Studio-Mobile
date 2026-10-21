@@ -515,11 +515,21 @@ public final class ProjectBuildService {
 
     /** After a failed build the screen also gets the engine's last lines, so the real cause is never out of sight. */
     private void appendTechnicalDetails() {
-        String[] lines = getLog().split("\n");
-        int from = Math.max(0, lines.length - 80);
-        StringBuilder out = new StringBuilder("\n--- Technical details (last " + (lines.length - from) + " lines) ---\n");
-        for (int i = from; i < lines.length; i++) out.append(lines[i]).append('\n');
+        // Same lines for APK and AAB builds. Bookkeeping that is written for the log file only (tags, toolchain and catalog notes,
+        // file system paths of the app) is left out; what remains is what the build tool itself reported.
+        List<String> keep = new ArrayList<>();
+        for (String line : getLog().split("\n")) if (!isInternalLine(line)) keep.add(line);
+        int from = Math.max(0, keep.size() - 80);
+        StringBuilder out = new StringBuilder("\n--- Technical details (last " + (keep.size() - from) + " lines) ---\n");
+        for (int i = from; i < keep.size(); i++) out.append(keep.get(i)).append('\n');
         showOnly(out.toString().trim());
+    }
+
+    private static boolean isInternalLine(String line) {
+        String lower = line.trim().toLowerCase(java.util.Locale.ROOT);
+        return lower.isEmpty() || lower.startsWith("[internal]") || lower.startsWith("[step]") || lower.startsWith("[progress]")
+            || lower.startsWith("toolchain install") || lower.startsWith("android.jar api") || lower.startsWith("kotlin-stdlib")
+            || lower.contains("catalog entry") || lower.contains("/data/user/") || lower.contains("gradle-runtime");
     }
 
     private void notifyState(State newState) {
