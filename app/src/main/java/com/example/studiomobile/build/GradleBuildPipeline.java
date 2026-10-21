@@ -44,10 +44,14 @@ public final class GradleBuildPipeline implements BuildPipeline {
         logger.onInfo("[step] Checking the build tools");
         GradleRuntimeManager.Resolution resolution = runtimeManager().resolve(project, configuration.isOfflineMode(), new ScreenLogger(logger));
         if (cancelled) return new BuildResult(BuildResult.Status.CANCELLED, null, "Gradle build cancelled.");
-        if (!resolution.isUsable()) return failed(resolution.error);
+        if (!resolution.isUsable()) {
+            logger.onInfo("[internal] " + resolution.error);   // the exact cause stays in the full log and the error report
+            return failed(plainReason(resolution.error));
+        }
         GradleRuntime runtime = resolution.runtime;
         List<String> command = runtime.buildCommand(configuration.isOfflineMode(), "assembleDebug");
         if (configuration.isBundleRequested()) command.add("bundleDebug");   // Export AAB: the APK and the bundle come from the same Gradle run
+        final boolean projectKey = addInjectedSigning(command, logger);
         logger.onInfo("Gradle project detected. Using the project's own Android Gradle Plugin and dependency declarations.");
         logger.onInfo(runtime.runsThroughJava()
             ? "Gradle is started through the packaged java launcher (" + runtime.getJavaLauncher().getAbsolutePath() + ") with JDK " + runtime.getJavaMajor() + " at " + runtime.getJavaHome()
@@ -103,7 +107,7 @@ public final class GradleBuildPipeline implements BuildPipeline {
                 File bundleTarget = new File(output, BuildConfiguration.BUNDLE_FILE_NAME);
                 if (aab == null) return failed("Gradle finished, but no .aab was found under app/build/outputs/bundle.");
                 if (!copy(aab, bundleTarget)) return failed("Gradle built an AAB but Studio Mobile could not copy it to the output directory.");
-                logger.onWarning("The bundle was built by Gradle and is signed with the Android debug key. Google Play needs a bundle signed with your own release key.");
+                if (!projectKey) logger.onWarning("The bundle is signed with the Android debug key because no key is set for this project. Open Keystore and choose your key; Google Play needs your own key.");
             }
             logger.onInfo("APK artifact found: " + destination.getAbsolutePath());
             logger.onWarning("This result confirms Gradle produced an APK artifact; signature verification is not performed by this Gradle adapter yet.");
@@ -131,7 +135,10 @@ public final class GradleBuildPipeline implements BuildPipeline {
             String friendly = friendly(message);
             if (friendly != null) delegate.onInfo(friendly);
         }
-        @Override public void onWarning(String message) { delegate.onWarning(message); }
+        @Override public void onWarning(String message) {
+            // Notes about the app's own tool catalog are for the log file; the screen gets the plain-words result instead.
+            if (message != null && message.contains("catalog entry")) delegate.onInfo("[internal] " + message); else delegate.onWarning(message);
+        }
         @Override public void onError(String message, Throwable cause) { delegate.onError(message, cause); }
         /** Components of the app's own catalog (Gradle, JDK, NDK, Python) are deliberately not named on the screen. */
         private static String friendly(String message) {
@@ -242,6 +249,29 @@ public final class GradleBuildPipeline implements BuildPipeline {
         for (File apk : apks) if (apk.isFile() && apk.length() > 0) return apk;
         return null;
     }
+    /**
+     * The key chosen on the Keystore page is written to build-tools/custom-signing.properties before every build. The in-process engine
+     * reads it itself; Gradle only knows a key it is told about, so it gets the same key through the Android Gradle plugin's injected
+     * signing properties (the ones Android Studio's "Generate Signed Bundle" uses). Returns true when a project key was passed.
+     */
+    private boolean addInjectedSigning(List<String> command, BuildLogger logger) {
+        File config = new File(new File(context.getFilesDir(), "build-tools"), "custom-signing.properties");
+        if (!config.isFile()) return false;
+        java.util.Properties properties = new java.util.Properties();
+        try (java.io.InputStream in = new java.io.FileInputStream(config)) { properties.load(in); }
+        catch (java.io.IOException failure) { logger.onWarning("The key of this project could not be read: " + failure.getMessage()); return false; }
+        String store = properties.getProperty("keystore", ""), alias = properties.getProperty("alias", "");
+        String storePassword = properties.getProperty("storePassword", ""), keyPassword = properties.getProperty("keyPassword", storePassword);
+        if (!new File(store).isFile() || alias.isEmpty()) { logger.onWarning("The key chosen for this project is incomplete or its file is missing; the Gradle build uses its own signing."); return false; }
+        command.add("-Pandroid.injected.signing.store.file=" + store);
+        command.add("-Pandroid.injected.signing.store.password=" + storePassword);
+        command.add("-Pandroid.injected.signing.key.alias=" + alias);
+        command.add("-Pandroid.injected.signing.key.password=" + keyPassword);
+        command.add("-Pandroid.injected.signing.store.type=pkcs12");
+        logger.onInfo("Signing with the key chosen for this project.");
+        return true;
+    }
+
     private static File findByExtension(File project, String extension) {
         List<File> found = new ArrayList<>();
         collectByExtension(new File(project, "app/build/outputs/bundle"), extension, found);
@@ -272,6 +302,14 @@ public final class GradleBuildPipeline implements BuildPipeline {
             while ((count = in.read(buffer)) != -1) out.write(buffer, 0, count);
             out.flush(); return target.isFile() && target.length() == source.length() && target.length() > 0;
         } catch (Exception ignored) { return false; }
+    }
+    /** Screen wording for a toolchain problem: no tool names, versions of the app's catalog or storage paths. */
+    private static String plainReason(String error) {
+        if (error == null) return "The build tools could not be prepared.";
+        if (error.startsWith("No usable Gradle distribution")) return "This project needs a build engine version that is not available on this device yet.";
+        if (error.startsWith("No JDK between")) return "This device does not have a Java runtime that fits this project yet.";
+        if (error.contains("/data/user/") || error.contains("catalog")) return "The build tools could not be prepared on this device.";
+        return error;
     }
     private static BuildResult failed(String message) { return new BuildResult(BuildResult.Status.FAILED, null, message); }
     @Override public void cancel() { cancelled = true; GradleRuntimeManager manager = runtimeManager; if (manager != null) manager.cancel(); Process process = activeProcess; if (process != null) process.destroy(); }
