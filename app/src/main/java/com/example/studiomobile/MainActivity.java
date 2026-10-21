@@ -175,7 +175,7 @@ public class MainActivity extends AppCompatActivity {
     private final McpRelayService.Listener relayListener = () -> runOnUiThread(this::renderMcpRelay);
     private final ActivityResultLauncher<String> notificationPermission = registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> { });
     private final ProjectBuildService.Listener buildListener = new ProjectBuildService.Listener() {
-        @Override public void onLogAppended(String line) { runOnUiThread(() -> renderBuildState()); }
+        @Override public void onLogAppended(String line) { runOnUiThread(() -> scheduleBuildRender()); }
         @Override public void onStateChanged(ProjectBuildService.State state) { runOnUiThread(() -> onBuildStateChanged(state)); }
     };
 
@@ -1853,16 +1853,59 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    // The log is redrawn at most a few times per second. A failed Gradle build writes hundreds of lines in a burst; redrawing the whole
+    // log for each one used to keep the UI thread busy for many seconds ("Studio Mobile is frozen").
+    private static final long BUILD_RENDER_MIN_INTERVAL_MS = 250;
+    private static final int MAX_SHOWN_LOG_CHARS = 150_000;
+    private long lastBuildRenderAt;
+    private boolean buildRenderScheduled;
+    private final Runnable buildRenderRunnable = () -> {
+        buildRenderScheduled = false;
+        lastBuildRenderAt = android.os.SystemClock.uptimeMillis();
+        renderBuildState();
+    };
+
+    /** UI thread only. Many calls in a row collapse into one redraw. */
+    private void scheduleBuildRender() {
+        if (screen != Screen.BUILD || buildRenderScheduled) return;
+        buildRenderScheduled = true;
+        long wait = Math.max(0, BUILD_RENDER_MIN_INTERVAL_MS - (android.os.SystemClock.uptimeMillis() - lastBuildRenderAt));
+        uiHandler.postDelayed(buildRenderRunnable, wait);
+    }
+
+    /** Shows only the end of a very long log; Copy log still copies everything. */
+    private static String tailOfLog(String text) {
+        if (text.length() <= MAX_SHOWN_LOG_CHARS) return text;
+        int from = text.indexOf('\n', text.length() - MAX_SHOWN_LOG_CHARS);
+        if (from < 0) from = text.length() - MAX_SHOWN_LOG_CHARS;
+        return "... (" + from + " earlier characters are not shown here; Copy log copies the whole log)\n" + text.substring(from + 1);
+    }
+
     private void renderBuildState() {
-        if (screen != Screen.BUILD) return;
+        if (screen != Screen.BUILD || screenView == null) return;
         TextView full = screenView.findViewById(R.id.full_log_text);
         ScrollView scroll = screenView.findViewById(R.id.log_scroll);
         boolean building = buildService.isBuilding();
         // Keep following the end of the log only when the reader is already at the end, so scrolling up to read is not undone every second.
         View content = scroll.getChildAt(0);
         boolean atEnd = content == null || content.getBottom() - (scroll.getHeight() + scroll.getScrollY()) < 120 * getResources().getDisplayMetrics().density;
-        String logText = buildService.getDisplayLog();
-        full.setText(logText.isEmpty() ? getString(R.string.no_output) : logText);
+        final int keepY = scroll.getScrollY();
+        // While the reader holds a text selection, a running build does not replace the text under their finger.
+        boolean selecting = building && full.hasSelection();
+        if (!selecting) {
+            String logText = buildService.getDisplayLog();
+            String shown = logText.isEmpty() ? getString(R.string.no_output) : tailOfLog(logText);
+            // Same text as before: touching it would only reset the cursor and make the ScrollView jump.
+            if (!shown.equals(full.getTag(R.id.full_log_text))) {
+                full.setTag(R.id.full_log_text, shown);
+                // EmojiCompat scans every character on the UI thread; for a log of hundreds of KB that took more than 10 seconds.
+                if (full instanceof androidx.appcompat.widget.AppCompatTextView) ((androidx.appcompat.widget.AppCompatTextView) full).setEmojiCompatEnabled(false);
+                full.setFilters(new android.text.InputFilter[0]);
+                full.setText(shown);
+                // setText on a selectable TextView puts the cursor back at position 0, which scrolls the ScrollView to the top.
+                if (!atEnd) restoreScrollAfterLayout(scroll, keepY);
+            }
+        }
         screenView.findViewById(R.id.build_progress).setVisibility(building ? View.VISIBLE : View.GONE);
         // A wake lock only keeps the CPU running, not the display. While the build page is open and a build runs, keep the screen on too.
         if (building) getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
@@ -1870,6 +1913,18 @@ public class MainActivity extends AppCompatActivity {
         uiHandler.removeCallbacks(buildLiveTick);
         if (building) uiHandler.postDelayed(buildLiveTick, 1000);
         if (atEnd) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    /** Puts the scroll position back after the next layout pass, before the frame is drawn (no visible jump). */
+    private static void restoreScrollAfterLayout(final ScrollView scroll, final int y) {
+        scroll.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
+            @Override public boolean onPreDraw() {
+                android.view.ViewTreeObserver observer = scroll.getViewTreeObserver();
+                if (observer.isAlive()) observer.removeOnPreDrawListener(this);
+                scroll.scrollTo(0, y);
+                return true;
+            }
+        });
     }
 
     private void startBuild() {
