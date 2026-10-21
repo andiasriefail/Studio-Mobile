@@ -6,6 +6,10 @@ import static org.junit.Assert.assertTrue;
 
 import com.example.studiomobile.build.BuildLogger;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
 import java.nio.file.Files;
 import org.junit.Rule;
 import org.junit.Test;
@@ -68,5 +72,23 @@ public class AndroidSdkLayoutBuildToolsTest {
         Files.write(aapt.toPath(), "real".getBytes("UTF-8"));
         AndroidSdkLayout.provideMissing(files, CORRUPTED_FAILURE, QUIET);
         assertEquals("real", new String(Files.readAllBytes(aapt.toPath()), "UTF-8"));
+    }
+
+    @Test public void coreForSystemModulesIsBuiltFromAndroidJarForApi34AndUp() throws Exception {
+        File files = temp.getRoot();
+        File platform = new File(files, "build-tools/platforms/android-37");
+        assertTrue(platform.mkdirs());
+        try (ZipOutputStream zip = new ZipOutputStream(new FileOutputStream(new File(platform, "android.jar")))) {
+            for (String name : new String[] {"java/lang/Object.class", "android/app/Activity.class", "resources.arsc"}) {
+                zip.putNextEntry(new ZipEntry(name)); zip.write(new byte[] {1, 2, 3}); zip.closeEntry();
+            }
+        }
+        assertTrue(AndroidSdkLayout.ensure(files, QUIET) != null);
+        File core = new File(files, "android-sdk/platforms/android-37/core-for-system-modules.jar");
+        assertTrue(core.isFile());
+        try (ZipFile zip = new ZipFile(core)) {
+            assertTrue(zip.getEntry("java/lang/Object.class") != null);
+            assertFalse(zip.getEntry("android/app/Activity.class") != null);
+        }
     }
 }
