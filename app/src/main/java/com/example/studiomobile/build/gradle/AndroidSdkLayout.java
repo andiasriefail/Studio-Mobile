@@ -6,6 +6,12 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
+import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.util.Enumeration;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipFile;
+import java.util.zip.ZipOutputStream;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -35,6 +41,9 @@ public final class AndroidSdkLayout {
     private static final String[] TOOL_JARS = {"lib/d8.jar", "lib/dx.jar", "lib/apksigner.jar", "core-lambda-stubs.jar"};
     private static final String[] TOOL_DIRECTORIES = {"renderscript/include", "renderscript/clang-include", "renderscript/lib"};
     private static final byte[] EMPTY_ZIP = {0x50, 0x4B, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    /** AGP builds a JDK image from platforms/android-N/core-for-system-modules.jar for compileSdk 34 and higher. */
+    private static final int CORE_MODULES_MIN_API = 34;
+    private static final String[] CORE_PACKAGES = {"java/", "javax/", "org/w3c/dom/", "org/xml/sax/"};
     private static final Pattern COMPILE_SDK_RELEASE = Pattern.compile("compileSdk\\s*\\{[^}]*?release\\(\\s*(\\d+)");
     private static final Pattern COMPILE_SDK = Pattern.compile("compileSdk(?:Version)?\\s*=?\\s*(\\d+)");
     private static final String XML_HEAD = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><ns2:repository "
@@ -64,7 +73,10 @@ public final class AndroidSdkLayout {
                 String problem = expose(jar, target);
                 if (problem != null) logger.onInfo(problem);
                 Matcher api = PLATFORM.matcher(platform.getName());
-                if (problem == null && api.matches()) writePlatformMetadata(target.getParentFile(), Integer.parseInt(api.group(1)));
+                if (problem == null && api.matches()) {
+                    writePlatformMetadata(target.getParentFile(), Integer.parseInt(api.group(1)));
+                    provideCoreForSystemModules(target.getParentFile(), Integer.parseInt(api.group(1)), logger);
+                }
             }
         }
         repairRegisteredBuildTools(sdk, logger);
@@ -121,7 +133,7 @@ public final class AndroidSdkLayout {
         String name = "android-" + api + minor;
         File dir = new File(sdk, "platforms/" + name);
         File jar = new File(dir, "android.jar");
-        if (jar.length() > 0) { writePlatformMetadata(dir, api); return true; }
+        if (jar.length() > 0) { writePlatformMetadata(dir, api); provideCoreForSystemModules(dir, api, logger); return true; }
         int bestApi = 0; File best = null;
         File[] platforms = new File(sdk, "platforms").listFiles();
         if (platforms != null) {
@@ -137,6 +149,7 @@ public final class AndroidSdkLayout {
             if (problem != null) { logger.onInfo(problem); return false; }
         } catch (IOException exception) { logger.onInfo("Platform " + name + " was not prepared (" + exception.getClass().getSimpleName() + ")."); return false; }
         writePlatformMetadata(dir, api);
+        provideCoreForSystemModules(dir, api, logger);
         if (bestApi >= api) logger.onInfo("Platform " + name + " is served by the installed android-" + bestApi + " jar.");
         else logger.onWarning("Platform " + name + " is not installed. The older android-" + bestApi + " jar is used instead; code that needs newer Android APIs will not compile.");
         return true;
@@ -213,6 +226,58 @@ public final class AndroidSdkLayout {
             try { if (fillTools(folder)) logger.onInfo("Build-tools " + folder.getName() + " was completed in the private SDK."); }
             catch (IOException exception) { logger.onInfo("Build-tools " + folder.getName() + " was not completed (" + exception.getClass().getSimpleName() + ")."); }
         }
+    }
+
+    /**
+     * AGP needs platforms/android-N/core-for-system-modules.jar for compileSdk 34+ (the JDK image javac compiles against) and stops with
+     * NoSuchFileException when it is absent. Studio Mobile keeps only android.jar, which already holds the Java core API stubs, so the
+     * file is built from the java/, javax/ and XML API classes in it. Written once per platform folder, through a temporary file.
+     */
+    private static void provideCoreForSystemModules(File platformDir, int api, BuildLogger logger) {
+        if (api < CORE_MODULES_MIN_API) return;
+        File target = new File(platformDir, "core-for-system-modules.jar");
+        if (target.length() > 0) return;
+        File source;
+        try { source = new File(platformDir, "android.jar").toPath().toRealPath().toFile(); }
+        catch (IOException exception) { return; }
+        if (source.length() == 0) return;
+        File partial = new File(platformDir, "core-for-system-modules.jar.partial");
+        int copied = 0;
+        try (ZipFile zip = new ZipFile(source); ZipOutputStream out = new ZipOutputStream(new FileOutputStream(partial))) {
+            byte[] buffer = new byte[16 * 1024];
+            Enumeration<? extends ZipEntry> entries = zip.entries();
+            while (entries.hasMoreElements()) {
+                ZipEntry entry = entries.nextElement();
+                String name = entry.getName();
+                if (entry.isDirectory() || !name.endsWith(".class") || name.endsWith("module-info.class") || !isCorePackage(name)) continue;
+                out.putNextEntry(new ZipEntry(name));
+                try (InputStream in = zip.getInputStream(entry)) {
+                    for (int read = in.read(buffer); read >= 0; read = in.read(buffer)) out.write(buffer, 0, read);
+                }
+                out.closeEntry();
+                copied++;
+            }
+        } catch (IOException exception) {
+            //noinspection ResultOfMethodCallIgnored
+            partial.delete();
+            logger.onInfo("core-for-system-modules.jar was not prepared for " + platformDir.getName() + " (" + exception.getClass().getSimpleName() + ").");
+            return;
+        }
+        if (copied == 0) { //noinspection ResultOfMethodCallIgnored
+            partial.delete(); return; }
+        try {
+            Files.move(partial.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING);
+            logger.onInfo("core-for-system-modules.jar prepared for " + platformDir.getName() + " (" + copied + " core classes taken from android.jar).");
+        } catch (IOException exception) {
+            //noinspection ResultOfMethodCallIgnored
+            partial.delete();
+            logger.onInfo("core-for-system-modules.jar was not prepared for " + platformDir.getName() + " (" + exception.getClass().getSimpleName() + ").");
+        }
+    }
+
+    private static boolean isCorePackage(String entryName) {
+        for (String prefix : CORE_PACKAGES) if (entryName.startsWith(prefix)) return true;
+        return false;
     }
 
     /**
