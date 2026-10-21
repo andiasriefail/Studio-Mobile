@@ -47,6 +47,7 @@ public final class GradleBuildPipeline implements BuildPipeline {
         if (!resolution.isUsable()) return failed(resolution.error);
         GradleRuntime runtime = resolution.runtime;
         List<String> command = runtime.buildCommand(configuration.isOfflineMode(), "assembleDebug");
+        if (configuration.isBundleRequested()) command.add("bundleDebug");   // Export AAB: the APK and the bundle come from the same Gradle run
         logger.onInfo("Gradle project detected. Using the project's own Android Gradle Plugin and dependency declarations.");
         logger.onInfo(runtime.runsThroughJava()
             ? "Gradle is started through the packaged java launcher (" + runtime.getJavaLauncher().getAbsolutePath() + ") with JDK " + runtime.getJavaMajor() + " at " + runtime.getJavaHome()
@@ -78,7 +79,9 @@ public final class GradleBuildPipeline implements BuildPipeline {
                 String firstOutput; synchronized (captured) { firstOutput = captured.toString(); }
                 // The project asked for an Android platform or build-tools folder that is not installed. A newer installed platform can
                 // stand in for it, so it is provided from what the app already has and the build is started once more.
-                if (firstOutput.contains("Failed to install the following Android SDK packages")
+                // AGP words it either as "Failed to install the following Android SDK packages" or, when the SDK folder simply has no
+                // matching platform, "Failed to find target with hash string 'android-36'". Both are answered the same way.
+                if ((firstOutput.contains("Failed to install the following Android SDK packages") || firstOutput.contains("Failed to find target with hash string"))
                         && AndroidSdkLayout.provideMissing(context.getFilesDir(), firstOutput, new ScreenLogger(logger)) > 0) {
                     logger.onInfo("[step] Preparing the Android SDK");
                     logger.onWarning("The project asked for Android SDK packages that are not installed. They were provided from the installed platform; building again.");
@@ -95,6 +98,13 @@ public final class GradleBuildPipeline implements BuildPipeline {
             if (apk == null) return failed("Gradle reported success, but no APK was found under app/build/outputs/apk or build/outputs/apk.");
             File destination = new File(output, "gradle-" + System.currentTimeMillis() + "-" + apk.getName());
             if (!copy(apk, destination)) return failed("Gradle built an APK but Studio Mobile could not copy it to the APK output directory.");
+            if (configuration.isBundleRequested()) {
+                File aab = findByExtension(project, ".aab");
+                File bundleTarget = new File(output, BuildConfiguration.BUNDLE_FILE_NAME);
+                if (aab == null) return failed("Gradle finished, but no .aab was found under app/build/outputs/bundle.");
+                if (!copy(aab, bundleTarget)) return failed("Gradle built an AAB but Studio Mobile could not copy it to the output directory.");
+                logger.onWarning("The bundle was built by Gradle and is signed with the Android debug key. Google Play needs a bundle signed with your own release key.");
+            }
             logger.onInfo("APK artifact found: " + destination.getAbsolutePath());
             logger.onWarning("This result confirms Gradle produced an APK artifact; signature verification is not performed by this Gradle adapter yet.");
             return new BuildResult(BuildResult.Status.SUCCESS, destination, "Gradle build completed and an APK artifact was found.");
@@ -231,6 +241,22 @@ public final class GradleBuildPipeline implements BuildPipeline {
         });
         for (File apk : apks) if (apk.isFile() && apk.length() > 0) return apk;
         return null;
+    }
+    private static File findByExtension(File project, String extension) {
+        List<File> found = new ArrayList<>();
+        collectByExtension(new File(project, "app/build/outputs/bundle"), extension, found);
+        if (found.isEmpty()) collectByExtension(new File(project, "build/outputs/bundle"), extension, found);
+        File newest = null;
+        for (File file : found) if (file.isFile() && file.length() > 0 && (newest == null || file.lastModified() > newest.lastModified())) newest = file;
+        return newest;
+    }
+    private static void collectByExtension(File directory, String extension, List<File> output) {
+        File[] children = directory.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            if (child.isDirectory()) collectByExtension(child, extension, output);
+            else if (child.isFile() && child.getName().toLowerCase(java.util.Locale.ROOT).endsWith(extension)) output.add(child);
+        }
     }
     private static void collectApks(File directory, List<File> output) {
         File[] children = directory.listFiles();
