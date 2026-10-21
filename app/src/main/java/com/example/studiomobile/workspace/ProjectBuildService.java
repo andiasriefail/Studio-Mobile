@@ -339,7 +339,10 @@ public final class ProjectBuildService {
             if (oldApks != null) for (File old : oldApks) deleteRecursively(old);
 
             boolean hasBuildFiles = GradleBuildPipeline.isGradleProject(buildRoot);
-            boolean useGradle = hasBuildFiles && hasGradleRuntime();
+            // Gradle only when the project really needs it (Android Studio project, extra plugins, ...); otherwise the local pipeline builds it.
+            String gradleReason = hasBuildFiles ? com.example.studiomobile.build.GradleNeedDetector.reasonToUseGradle(buildRoot) : null;
+            boolean useGradle = hasBuildFiles && gradleReason != null && hasGradleRuntime();
+            if (hasBuildFiles) appendInfo("[internal] Build route: " + (useGradle ? "Gradle (" + gradleReason + ")" : "local pipeline (no Gradle-only feature found)"));
             BuildConfiguration configuration = new BuildConfiguration(buildRoot, apkOutput, !hasBuildFiles, bundle);
             BuildPipeline pipeline = useGradle ? new GradleBuildPipeline(appContext) : new LocalBuildPipeline(appContext);
             activePipeline = pipeline;
