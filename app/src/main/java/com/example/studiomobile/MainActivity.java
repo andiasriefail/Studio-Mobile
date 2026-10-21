@@ -1842,8 +1842,21 @@ public class MainActivity extends AppCompatActivity {
             clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.build_log), shownLog.isEmpty() ? getString(R.string.no_output) : shownLog));
             toast(LanguageUi.LOG_COPIED);
         });
+        // While a finger is on the log, the text under it is not touched; it catches up a moment after the finger lifts.
+        logTouching = false;
+        screenView.findViewById(R.id.log_scroll).setOnTouchListener((view, event) -> {
+            int action = event.getActionMasked();
+            if (action == android.view.MotionEvent.ACTION_DOWN) logTouching = true;
+            else if (action == android.view.MotionEvent.ACTION_UP || action == android.view.MotionEvent.ACTION_CANCEL) {
+                logTouching = false;
+                uiHandler.postDelayed(this::scheduleBuildRender, 400);
+            }
+            return false;
+        });
         if (start && !buildService.isBuilding()) startBuild(); else renderBuildState();
     }
+
+    private boolean logTouching;
 
     /** While a build runs the log is redrawn about once a second so the running clock on its last line keeps ticking. */
     private final Runnable buildLiveTick = new Runnable() {
@@ -1891,7 +1904,7 @@ public class MainActivity extends AppCompatActivity {
         boolean atEnd = content == null || content.getBottom() - (scroll.getHeight() + scroll.getScrollY()) < 120 * getResources().getDisplayMetrics().density;
         final int keepY = scroll.getScrollY();
         // While the reader holds a text selection, a running build does not replace the text under their finger.
-        boolean selecting = building && full.hasSelection();
+        boolean selecting = building && (full.hasSelection() || logTouching);
         if (!selecting) {
             String logText = buildService.getDisplayLog();
             String shown = logText.isEmpty() ? getString(R.string.no_output) : tailOfLog(logText);
@@ -1901,10 +1914,17 @@ public class MainActivity extends AppCompatActivity {
                 // EmojiCompat scans every character on the UI thread; for a log of hundreds of KB that took more than 10 seconds.
                 if (full instanceof androidx.appcompat.widget.AppCompatTextView) ((androidx.appcompat.widget.AppCompatTextView) full).setEmojiCompatEnabled(false);
                 full.setFilters(new android.text.InputFilter[0]);
-                full.setText(shown);
-                // setText on a selectable TextView puts the cursor back at position 0, which scrolls the ScrollView to the top.
-                if (!atEnd) restoreScrollAfterLayout(scroll, keepY);
+                // While the build runs the text changes every second (the running clock of the last step). A selectable TextView puts its
+                // cursor back at position 0 on every setText and scrolls the ScrollView to the top, so it is not selectable during the build.
+                if (building && full.isTextSelectable()) full.setTextIsSelectable(false);
+                applyLogText(full, shown);
+                if (!atEnd) holdScrollPosition(scroll, keepY);
             }
+        }
+        // Selecting text is allowed again once the build is over and the text no longer changes.
+        if (!building && !full.isTextSelectable()) {
+            full.setTextIsSelectable(true);
+            if (!atEnd) holdScrollPosition(scroll, keepY);
         }
         screenView.findViewById(R.id.build_progress).setVisibility(building ? View.VISIBLE : View.GONE);
         // A wake lock only keeps the CPU running, not the display. While the build page is open and a build runs, keep the screen on too.
@@ -1912,11 +1932,34 @@ public class MainActivity extends AppCompatActivity {
         else getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         uiHandler.removeCallbacks(buildLiveTick);
         if (building) uiHandler.postDelayed(buildLiveTick, 1000);
-        if (atEnd) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+        // Scroll to the end directly. fullScroll() also moves the keyboard focus, which could pull the view back to the cursor.
+        if (atEnd && !logTouching) scroll.post(() -> {
+            View child = scroll.getChildAt(0);
+            if (child != null && !logTouching) scroll.scrollTo(0, Math.max(0, child.getHeight() - scroll.getHeight()));
+        });
     }
 
-    /** Puts the scroll position back after the next layout pass, before the frame is drawn (no visible jump). */
-    private static void restoreScrollAfterLayout(final ScrollView scroll, final int y) {
+    /**
+     * Replaces only the part of the text that changed (the new lines at the end and the running clocks of the current steps), not the
+     * whole text. A full setText re-lays out everything and, on a selectable TextView, moves the cursor and the scroll position.
+     */
+    private static void applyLogText(TextView full, String shown) {
+        CharSequence current = full.getText();
+        if (!(current instanceof android.text.Editable)) { full.setText(shown, TextView.BufferType.EDITABLE); return; }
+        android.text.Editable text = (android.text.Editable) current;
+        int oldLength = text.length(), newLength = shown.length(), prefix = 0, limit = Math.min(oldLength, newLength);
+        while (prefix < limit && text.charAt(prefix) == shown.charAt(prefix)) prefix++;
+        int oldEnd = oldLength, newEnd = newLength;
+        while (oldEnd > prefix && newEnd > prefix && text.charAt(oldEnd - 1) == shown.charAt(newEnd - 1)) { oldEnd--; newEnd--; }
+        text.replace(prefix, oldEnd, shown, prefix, newEnd);
+    }
+
+    /**
+     * Keeps the reader where they are after the text was replaced. TextView registers its own pre-draw step during layout, after any
+     * listener added here, and that step can scroll to the cursor again, so the position is put back right before the next frames
+     * are drawn and once more shortly after.
+     */
+    private void holdScrollPosition(final ScrollView scroll, final int y) {
         scroll.getViewTreeObserver().addOnPreDrawListener(new android.view.ViewTreeObserver.OnPreDrawListener() {
             @Override public boolean onPreDraw() {
                 android.view.ViewTreeObserver observer = scroll.getViewTreeObserver();
@@ -1925,6 +1968,10 @@ public class MainActivity extends AppCompatActivity {
                 return true;
             }
         });
+        Runnable restore = () -> { if (screen == Screen.BUILD && scroll.getScrollY() != y && scroll.getScrollY() == 0) scroll.scrollTo(0, y); };
+        scroll.post(restore);
+        scroll.postDelayed(restore, 60);
+        scroll.postDelayed(restore, 200);
     }
 
     private void startBuild() {
