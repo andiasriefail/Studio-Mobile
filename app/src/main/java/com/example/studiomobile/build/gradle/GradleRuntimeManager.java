@@ -104,6 +104,12 @@ public final class GradleRuntimeManager {
             // bin/java inside the JDK tree points at the launcher so that Gradle can start the child JVM it forks.
             String linkProblem = JdkLauncherLink.ensure(jdk.home, javaLauncher);
             if (linkProblem != null) logger.onWarning(linkProblem);
+            // AGP starts <jdk>/bin/jlink for compileSdk 34+; like bin/java it can only run from the native library directory.
+            File jlinkLauncher = new File(javaLauncher.getParentFile(), "libjlinkexe.so");
+            if (jlinkLauncher.isFile()) {
+                String jlinkProblem = JdkLauncherLink.ensureTool(jdk.home, "jlink", jlinkLauncher);
+                if (jlinkProblem != null) logger.onWarning(jlinkProblem);
+            } else logger.onWarning("No packaged jlink launcher (libjlinkexe.so) in the native library directory; projects with compileSdk 34 or higher cannot create the JDK image and fail at jlink.");
             String selfTest = NativeToolSelfTest.checkJava(javaLauncher, jdk.home);
             if (selfTest != null) return fail(selfTest);
             logger.onInfo("java launcher self-test passed (" + javaLauncher.getName() + ").");
