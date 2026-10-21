@@ -143,15 +143,27 @@ public final class AndroidSdkLayout {
         } catch (IOException exception) { logger.onInfo("Build-tools " + version + " was not prepared (" + exception.getClass().getSimpleName() + ")."); return false; }
     }
 
+    /**
+     * package.xml and build.prop are what the Android Gradle Plugin reads to accept a folder as an installed platform. Without a valid
+     * package.xml the platform is skipped ("package.xml parsing problem"), without build.prop it is rejected ("Build properties not
+     * found"), and either way the build stops with "Failed to find target with hash string 'android-NN'". An earlier version wrote a
+     * base-extension element that the plugin's parser does not know, so such a file left by an older run is rewritten here.
+     */
     private static void writePlatformMetadata(File dir, int api) {
         File xml = new File(dir, "package.xml");
-        if (xml.isFile()) return;
         try {
-            write(xml, XML_HEAD + "<localPackage path=\"platforms;android-" + api + "\" obsolete=\"false\">"
-                + "<type-details xsi:type=\"ns5:platformDetailsType\"><api-level>" + api + "</api-level><base-extension>true</base-extension><layoutlib api=\"15\"/></type-details>"
-                + "<revision><major>1</major></revision><display-name>Android SDK Platform " + api + "</display-name></localPackage></ns2:repository>");
-            write(new File(dir, "source.properties"), "Pkg.Desc=Android SDK Platform " + api + "\nPkg.Revision=1\nPkg.Path=platforms;android-" + api
+            boolean stale = !xml.isFile() || new String(Files.readAllBytes(xml.toPath()), StandardCharsets.UTF_8).contains("base-extension");
+            if (stale) {
+                write(xml, XML_HEAD + "<localPackage path=\"platforms;android-" + api + "\" obsolete=\"false\">"
+                    + "<type-details xsi:type=\"ns5:platformDetailsType\"><api-level>" + api + "</api-level><layoutlib api=\"15\"/></type-details>"
+                    + "<revision><major>1</major></revision><display-name>Android SDK Platform " + api + "</display-name></localPackage></ns2:repository>");
+            }
+            File source = new File(dir, "source.properties");
+            if (!source.isFile() || stale) write(source, "Pkg.Desc=Android SDK Platform " + api + "\nPkg.Revision=1\nPkg.Path=platforms;android-" + api
                 + "\nAndroidVersion.ApiLevel=" + api + "\nLayoutlib.Api=15\n");
+            File props = new File(dir, "build.prop");
+            if (!props.isFile()) write(props, "ro.build.version.sdk=" + api + "\nro.build.version.codename=REL\nro.build.version.release="
+                + (api >= 33 ? api - 20 : api) + "\nro.build.version.incremental=studio-mobile\nro.build.id=studio-mobile\nro.product.cpu.abi=arm64-v8a\n");
         } catch (IOException ignored) { /* the build reports a missing platform by itself */ }
     }
 
