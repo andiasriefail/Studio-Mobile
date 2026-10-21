@@ -203,6 +203,14 @@ jobs:
             tar -xJf "$RUNNER_TEMP/jre/$asset" -C "$RUNNER_TEMP/jre" "jre-21/bin/java"
             cp "$RUNNER_TEMP/jre/jre-21/bin/java" "$dest/libjavaexe.so"
             chmod 755 "$dest/libjavaexe.so"
+            # AGP starts <jdk>/bin/jlink to build the JDK image for compileSdk 34+. App storage cannot run it, so it ships like the java launcher.
+            if tar -xJf "$RUNNER_TEMP/jre/$asset" -C "$RUNNER_TEMP/jre" "jre-21/bin/jlink"; then
+              cp "$RUNNER_TEMP/jre/jre-21/bin/jlink" "$dest/libjlinkexe.so"
+              chmod 755 "$dest/libjlinkexe.so"
+              readelf -h "$dest/libjlinkexe.so" | grep -q "Machine:.*$machine" || { echo "libjlinkexe.so for $abi is not a $machine binary" >&2; exit 1; }
+            else
+              echo "::warning::jre-21/bin/jlink is not in $asset; $abi cannot build projects with compileSdk 34 or higher."
+            fi
             readelf -h "$dest/libjavaexe.so" | grep -q "Machine:.*$machine" || { echo "libjavaexe.so for $abi is not a $machine binary" >&2; exit 1; }
             echo "launcher for $abi:"; readelf -d "$dest/libjavaexe.so" | grep -E 'NEEDED|RUNPATH' || true
             record jdk "$abi" "$sum" "$(stat -c %s "$RUNNER_TEMP/jre/$asset")"
