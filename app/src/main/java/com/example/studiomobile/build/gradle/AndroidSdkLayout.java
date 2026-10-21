@@ -24,6 +24,17 @@ public final class AndroidSdkLayout {
     /** AGP's own wording when no platform folder matches compileSdk: "Failed to find target with hash string 'android-36' in: ...". */
     private static final Pattern NEEDS_TARGET = Pattern.compile("Failed to find target with hash string 'android-(\\d+)(\\.\\d+)?'");
     private static final Pattern NEEDS_TOOLS = Pattern.compile("build-tools;(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?");
+    /** AGP's wording when a registered build-tools folder lacks files: "Installed Build Tools revision 36.0.0 is corrupted" / "Build-tool 36.0.0 is missing AAPT at ...". */
+    private static final Pattern NEEDS_TOOLS_REPAIR = Pattern.compile("(?:Build Tools revision|Build-tool) (\\d+)\\.(\\d+)\\.(\\d+) is (?:corrupted|missing)");
+    private static final Pattern TOOLS_VERSION = Pattern.compile("(\\d+)\\.(\\d+)\\.(\\d+)");
+    /**
+     * Files AGP's build-tools check looks for. Only their presence is tested: aapt2 comes from android.aapt2FromMavenOverride and D8/R8
+     * from Maven, so these are placeholders. The list is the full set of a real build-tools package, so no revision is reported missing a file.
+     */
+    private static final String[] TOOL_FILES = {"aapt", "aapt2", "aidl", "apksigner", "bcc_compat", "d8", "dx", "dexdump", "llvm-rs-cc", "split-select", "zipalign", "lld-bin/lld"};
+    private static final String[] TOOL_JARS = {"lib/d8.jar", "lib/dx.jar", "lib/apksigner.jar", "core-lambda-stubs.jar"};
+    private static final String[] TOOL_DIRECTORIES = {"renderscript/include", "renderscript/clang-include", "renderscript/lib"};
+    private static final byte[] EMPTY_ZIP = {0x50, 0x4B, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
     private static final Pattern COMPILE_SDK_RELEASE = Pattern.compile("compileSdk\\s*\\{[^}]*?release\\(\\s*(\\d+)");
     private static final Pattern COMPILE_SDK = Pattern.compile("compileSdk(?:Version)?\\s*=?\\s*(\\d+)");
     private static final String XML_HEAD = "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><ns2:repository "
@@ -56,6 +67,7 @@ public final class AndroidSdkLayout {
                 if (problem == null && api.matches()) writePlatformMetadata(target.getParentFile(), Integer.parseInt(api.group(1)));
             }
         }
+        repairRegisteredBuildTools(sdk, logger);
         int requested = project == null ? 0 : readCompileSdk(project);
         if (requested > 0) providePlatform(sdk, requested, logger);
         File[] exposed = new File(sdk, "platforms").listFiles();
@@ -84,13 +96,15 @@ public final class AndroidSdkLayout {
             String minor = target.group(2) == null ? "" : target.group(2);   // "android-36.1" is its own folder name
             if (seenTargets.add(api + minor) && providePlatform(sdk, api, minor, logger)) provided++;
         }
-        Matcher tools = NEEDS_TOOLS.matcher(gradleOutput);
         java.util.Set<String> seenTools = new java.util.HashSet<>();
-        while (tools.find()) {
-            int major = Integer.parseInt(tools.group(1));
-            int minor = tools.group(2) == null ? 0 : Integer.parseInt(tools.group(2));
-            int micro = tools.group(3) == null ? 0 : Integer.parseInt(tools.group(3));
-            if (seenTools.add(major + "." + minor + "." + micro) && provideBuildTools(sdk, major, minor, micro, logger)) provided++;
+        for (Pattern pattern : new Pattern[] {NEEDS_TOOLS, NEEDS_TOOLS_REPAIR}) {
+            Matcher tools = pattern.matcher(gradleOutput);
+            while (tools.find()) {
+                int major = Integer.parseInt(tools.group(1));
+                int minor = tools.group(2) == null ? 0 : Integer.parseInt(tools.group(2));
+                int micro = tools.group(3) == null ? 0 : Integer.parseInt(tools.group(3));
+                if (seenTools.add(major + "." + minor + "." + micro) && provideBuildTools(sdk, major, minor, micro, logger)) provided++;
+            }
         }
         return provided;
     }
@@ -128,19 +142,77 @@ public final class AndroidSdkLayout {
         return true;
     }
 
+    /**
+     * Registers build-tools/<version> and fills it with every file AGP expects. True when something was written, so a caller knows a
+     * new build can behave differently; false when the folder was already complete.
+     */
     private static boolean provideBuildTools(File sdk, int major, int minor, int micro, BuildLogger logger) {
         String version = major + "." + minor + "." + micro;
         File dir = new File(sdk, "build-tools/" + version);
-        if (new File(dir, "package.xml").isFile()) return false;
         if (!dir.isDirectory() && !dir.mkdirs()) return false;
         try {
-            write(new File(dir, "package.xml"), XML_HEAD + "<localPackage path=\"build-tools;" + version + "\" obsolete=\"false\">"
-                + "<type-details xsi:type=\"ns3:genericDetailsType\"/><revision><major>" + major + "</major><minor>" + minor + "</minor><micro>" + micro
-                + "</micro></revision><display-name>Android SDK Build-Tools " + major + "</display-name></localPackage></ns2:repository>");
-            write(new File(dir, "source.properties"), "Pkg.Desc=Android SDK Build-Tools " + major + "\nPkg.Revision=" + version + "\nPkg.Path=build-tools;" + version + "\n");
-            logger.onInfo("Build-tools " + version + " is registered in the private SDK (the native tools of this device are used instead).");
-            return true;
+            boolean changed = false;
+            File packageXml = new File(dir, "package.xml");
+            if (!packageXml.isFile()) {
+                write(packageXml, XML_HEAD + "<localPackage path=\"build-tools;" + version + "\" obsolete=\"false\">"
+                    + "<type-details xsi:type=\"ns3:genericDetailsType\"/><revision><major>" + major + "</major><minor>" + minor + "</minor><micro>" + micro
+                    + "</micro></revision><display-name>Android SDK Build-Tools " + major + "</display-name></localPackage></ns2:repository>");
+                changed = true;
+            }
+            File source = new File(dir, "source.properties");
+            if (!source.isFile()) {
+                write(source, "Pkg.Desc=Android SDK Build-Tools " + major + "\nPkg.Revision=" + version + "\nPkg.Path=build-tools;" + version + "\n");
+                changed = true;
+            }
+            if (fillTools(dir)) changed = true;
+            if (changed) logger.onInfo("Build-tools " + version + " is registered in the private SDK (the native tools of this device are used instead).");
+            return changed;
         } catch (IOException exception) { logger.onInfo("Build-tools " + version + " was not prepared (" + exception.getClass().getSimpleName() + ")."); return false; }
+    }
+
+    /**
+     * Creates the placeholder files and folders a real build-tools package has. AGP calls a build-tools folder "corrupted" when one is
+     * absent ("Build-tool 36.0.0 is missing AAPT at .../aapt"), and a folder holding only package.xml fails that check. Existing files
+     * are never replaced. Returns true when anything was created.
+     */
+    private static boolean fillTools(File dir) throws IOException {
+        boolean created = false;
+        for (String name : TOOL_FILES) {
+            File file = new File(dir, name);
+            if (file.exists()) continue;
+            if (file.getParentFile() != null && !file.getParentFile().isDirectory() && !file.getParentFile().mkdirs()) continue;
+            write(file, "#!/system/bin/sh\necho 'Studio Mobile: " + name + " is provided natively on this device' >&2\nexit 1\n");
+            //noinspection ResultOfMethodCallIgnored
+            file.setExecutable(true, false);
+            created = true;
+        }
+        for (String name : TOOL_JARS) {
+            File file = new File(dir, name);
+            if (file.exists()) continue;
+            if (file.getParentFile() != null && !file.getParentFile().isDirectory() && !file.getParentFile().mkdirs()) continue;
+            Files.write(file.toPath(), EMPTY_ZIP);
+            created = true;
+        }
+        for (String name : TOOL_DIRECTORIES) {
+            File folder = new File(dir, name);
+            if (!folder.isDirectory() && folder.mkdirs()) created = true;
+        }
+        return created;
+    }
+
+    /**
+     * Completes build-tools folders left behind by an earlier version that wrote only package.xml. Runs before every Gradle start, so
+     * such a folder is repaired up front instead of costing a failed build first.
+     */
+    private static void repairRegisteredBuildTools(File sdk, BuildLogger logger) {
+        File[] folders = new File(sdk, "build-tools").listFiles();
+        if (folders == null) return;
+        for (File folder : folders) {
+            Matcher version = TOOLS_VERSION.matcher(folder.getName());
+            if (!folder.isDirectory() || !version.matches() || !new File(folder, "package.xml").isFile()) continue;
+            try { if (fillTools(folder)) logger.onInfo("Build-tools " + folder.getName() + " was completed in the private SDK."); }
+            catch (IOException exception) { logger.onInfo("Build-tools " + folder.getName() + " was not completed (" + exception.getClass().getSimpleName() + ")."); }
+        }
     }
 
     /**
