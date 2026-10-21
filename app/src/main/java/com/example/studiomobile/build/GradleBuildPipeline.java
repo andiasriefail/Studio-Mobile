@@ -85,7 +85,8 @@ public final class GradleBuildPipeline implements BuildPipeline {
                 // stand in for it, so it is provided from what the app already has and the build is started once more.
                 // AGP words it either as "Failed to install the following Android SDK packages" or, when the SDK folder simply has no
                 // matching platform, "Failed to find target with hash string 'android-36'". Both are answered the same way.
-                if ((firstOutput.contains("Failed to install the following Android SDK packages") || firstOutput.contains("Failed to find target with hash string"))
+                if ((firstOutput.contains("Failed to install the following Android SDK packages") || firstOutput.contains("Failed to find target with hash string")
+                            || firstOutput.contains("is corrupted. Remove and install again") || (firstOutput.contains("Build-tool ") && firstOutput.contains(" is missing ")))
                         && AndroidSdkLayout.provideMissing(context.getFilesDir(), firstOutput, new ScreenLogger(logger)) > 0) {
                     logger.onInfo("[step] Preparing the Android SDK");
                     logger.onWarning("The project asked for Android SDK packages that are not installed. They were provided from the installed platform; building again.");
