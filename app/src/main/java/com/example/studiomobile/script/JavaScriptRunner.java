@@ -19,6 +19,30 @@ import java.util.Map;
  */
 public final class JavaScriptRunner {
     public static final String EXECUTABLE_NAME = "libnodeexe.so";
+    static final String PRELOAD_NAME = "studio-node-preload.js";
+
+    /**
+     * Loaded before the user's script ({@code node -r}), so the script itself stays exactly as the user wrote it.
+     *
+     * <p>On the 32-bit (armeabi-v7a) Node build, an error that nothing catches ends the process with exit code 1 and prints nothing at all, not even
+     * the message. console.error works, so these two handlers print the stack that way. A script that installs its own handler keeps full control
+     * (we only act when ours is the only listener), and the exit code stays 1 like a normal Node.js crash.
+     */
+    static final String PRELOAD_SOURCE =
+        "'use strict';\n"
+        + "function show(error) {\n"
+        + "  try { console.error(error && error.stack ? error.stack : String(error)); } catch (ignored) { }\n"
+        + "}\n"
+        + "process.on('uncaughtException', function (error) {\n"
+        + "  if (process.listenerCount('uncaughtException') > 1) return;\n"
+        + "  show(error);\n"
+        + "  process.exit(1);\n"
+        + "});\n"
+        + "process.on('unhandledRejection', function (reason) {\n"
+        + "  if (process.listenerCount('unhandledRejection') > 1) return;\n"
+        + "  show(reason);\n"
+        + "  process.exit(1);\n"
+        + "});\n";
 
     private volatile Process activeProcess;
     private final BuildProcessRunner runner = new BuildProcessRunner(new BuildProcessRunner.ProcessObserver() {
@@ -47,6 +71,8 @@ public final class JavaScriptRunner {
         if (!dataDirectory.isDirectory() && !dataDirectory.mkdirs()) throw new IOException("Could not create " + dataDirectory);
         List<String> command = new ArrayList<>();
         command.add(new File(nativeLibraryDirectory, EXECUTABLE_NAME).getAbsolutePath());
+        File preload = writePreload();
+        if (preload != null) { command.add("--require"); command.add(preload.getAbsolutePath()); }
         command.add(script.getAbsolutePath());
         Map<String, String> environment = new HashMap<>();
         environment.put("HOME", dataDirectory.getAbsolutePath());
@@ -54,5 +80,19 @@ public final class JavaScriptRunner {
         environment.put("NODE_NO_WARNINGS", "1");
         BuildProcessRunner.Result result = runner.run(command, script.getParentFile(), timeoutSeconds, logger, environment);
         return result.isTimedOut() ? -1 : result.getExitCode();
+    }
+
+    /** Writes the preload script into the cache folder. @return the file, or null when it cannot be written (the script then runs without it). */
+    private File writePreload() {
+        try {
+            if (!cacheDirectory.isDirectory() && !cacheDirectory.mkdirs()) return null;
+            File file = new File(cacheDirectory, PRELOAD_NAME);
+            byte[] wanted = PRELOAD_SOURCE.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            if (!file.isFile() || file.length() != wanted.length || !java.util.Arrays.equals(java.nio.file.Files.readAllBytes(file.toPath()), wanted))
+                java.nio.file.Files.write(file.toPath(), wanted);
+            return file;
+        } catch (IOException | RuntimeException cannotWrite) {
+            return null;
+        }
     }
 }
