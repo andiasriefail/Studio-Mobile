@@ -155,7 +155,7 @@ public final class McpToolRegistry {
             "Checks the syntax of ONE file without running it: .py, .dart, .js, .c, .cc, .cpp, .cxx, .h, .hpp. Never executes your code. "
                 + "Answers 'RESULT: OK', 'RESULT: SYNTAX ERRORS' (file and line) or 'RESULT: NOT CHECKED' (with the reason). "
                 + "Python, Dart and C/C++ work only on arm64-v8a phones (see get_toolchain_info); on other phones the answer is NOT CHECKED and you must tell the user, not try another way. "
-                + "JavaScript is parsed with Rhino (ES6) on every phone. Java, Kotlin, XML and Gradle files are not covered: only the user's Build checks them.",
+                + "JavaScript is parsed with node --check on every phone (.js files as CommonJS). Java, Kotlin, XML and Gradle files are not covered: only the user's Build checks them.",
             false, false, schema()
                 .string("project", "Project name.", true)
                 .string("path", "File path relative to the project root.", true)

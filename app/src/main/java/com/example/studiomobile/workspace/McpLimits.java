@@ -61,7 +61,7 @@ public final class McpLimits {
         text.append("- Studio Mobile never generates MainActivity, layouts or sample code. Empty projects stay empty.\n\n");
 
         text.append("LANGUAGE SUPPORT BY DEVICE (read this before you touch Python, Dart, C or C++)\n");
-        text.append("- Java and Kotlin build the app itself (screens, logic, resources) and work on every phone. JavaScript runs on Rhino (ES6, no import/export modules).\n");
+        text.append("- Java and Kotlin build the app itself (screens, logic, resources) and work on every phone. JavaScript runs on a real Node.js binary bundled for the phone's own ABI (CommonJS with require; use .mjs for ES modules).\n");
         text.append("- Python (CPython), Dart and C/C++ compiled on the phone (NDK clang) exist ONLY for arm64-v8a phones. ")
             .append("They do NOT work on 32-bit ARM phones (armeabi-v7a), on x86 phones, or on x86_64 phones that cannot run arm64 code.\n");
         text.append("- What each one is for:\n");
