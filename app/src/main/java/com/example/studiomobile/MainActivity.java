@@ -1433,33 +1433,26 @@ public class MainActivity extends AppCompatActivity {
         catch (RuntimeException error) { ticket.release(); throw error; }
     }
 
-    /** Runs a .js file with Rhino in-process (works on every ABI, including 32-bit phones). */
+    /** Runs a .js file with the bundled Node.js binary (libnodeexe.so) and shows its output live. */
     private void runJavaScriptFile(File file) {
         if (dirty && file.equals(openedFile)) { toast("Save the file before running it"); return; }
         com.example.studiomobile.RunGate.Ticket ticket = beginRun();
         if (ticket == null) return;
-        com.example.studiomobile.script.JavaScriptRunner runner = new com.example.studiomobile.script.JavaScriptRunner();
-        // Rhino runs inside this process and cannot be killed. If the script ignores Stop (for example inside a long regular expression),
-        // the gate is freed 3 s later so Run is never locked for good.
-        RunConsole console = openConsole(ticket, file.getName(), () -> {
-            runner.cancel();
-            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(ticket::release, 3000);
-        });
-        // Own thread: a script that hangs must not block the executor the Python and Dart runs use.
-        Thread jsThread = new Thread(() -> {
+        com.example.studiomobile.script.JavaScriptRunner runner = new com.example.studiomobile.script.JavaScriptRunner(
+                new File(getApplicationInfo().nativeLibraryDir), new File(getFilesDir(), "node-home"), getCacheDir());
+        RunConsole console = openConsole(ticket, file.getName(), runner::cancel);
+        com.example.studiomobile.build.BuildLogger logger = console.logger;
+        pythonExecutor.execute(() -> {
             try {
-                String source = new String(java.nio.file.Files.readAllBytes(file.toPath()), java.nio.charset.StandardCharsets.UTF_8);
-                console.logger.onInfo("$ rhino " + file.getName());
-                int code = runner.run(source, file.getName(), 60, console.logger);
-                if (code >= 0) console.logger.onInfo("\n[finished with exit code " + code + "]");
-            } catch (Throwable error) {
-                console.logger.onError("Could not run JavaScript: " + error, error);
+                logger.onInfo("$ node " + file.getName());
+                int code = runner.run(file, 120, logger);
+                logger.onInfo(code == -1 ? "\n[timed out or stopped]" : "\n[process finished with exit code " + code + "]");
+            } catch (Exception error) {
+                logger.onError("Could not run JavaScript: " + error.getMessage(), error);
             } finally {
                 ticket.release();
             }
-        }, "js-run");
-        jsThread.setDaemon(true);
-        jsThread.start();
+        });
     }
 
     /** Runs a .dart file: compiled to kernel by the Dart front end, then executed on the Dart VM (64-bit devices only). */
