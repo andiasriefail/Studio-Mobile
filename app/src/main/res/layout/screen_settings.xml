@@ -45,6 +45,60 @@
             android:paddingBottom="32dp">
 
             <!-- One card per setting; a new setting is another card in this list. -->
+            <!-- Studio Mobile Debug Mode: on by default; tapping the card or the checkbox switches it. -->
+            <LinearLayout
+                android:id="@+id/settings_debug"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/bg_card"
+                android:clickable="true"
+                android:focusable="true"
+                android:foreground="?attr/selectableItemBackground"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="20dp">
+                <FrameLayout
+                    android:layout_width="48dp"
+                    android:layout_height="48dp"
+                    android:background="@drawable/bg_avatar_lilac">
+                    <ImageView
+                        android:layout_width="24dp"
+                        android:layout_height="24dp"
+                        android:layout_gravity="center"
+                        android:src="@drawable/ic_bug"
+                        android:tint="@color/cosmic_primary"
+                        android:contentDescription="@null" />
+                </FrameLayout>
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="16dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/settings_debug_title"
+                        android:textColor="@color/cosmic_ink"
+                        android:textSize="18sp"
+                        android:fontFamily="sans-serif-medium" />
+                    <TextView
+                        style="@style/Cosmic.Muted"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="@string/settings_debug_desc" />
+                </LinearLayout>
+                <CheckBox
+                    android:id="@+id/settings_debug_check"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:buttonTint="@color/cosmic_primary"
+                    android:contentDescription="@string/settings_debug_title" />
+            </LinearLayout>
+
             <LinearLayout
                 android:id="@+id/settings_wallpaper"
                 android:layout_width="match_parent"
