@@ -45,10 +45,27 @@ public final class GradleRuntimeProvisioner {
         return null;
     }
 
-    /** Lowest JDK major in [min, max] that the catalog offers for this device, or -1. */
-    public int findJdkMajor(int min, int max) {
-        for (int major = min; major <= max; major++) if (find("jdk-" + major) != null) return major;
-        return -1;
+    /** Every Gradle version the catalog offers for this device, mapped to its component id ("gradle-8.13" -> 8.13). */
+    public java.util.Map<GradleVersion, String> gradleComponentIds() {
+        java.util.Map<GradleVersion, String> found = new java.util.HashMap<>();
+        if (catalog == null) return found;
+        for (BuildToolCatalog.Component component : catalog.getComponents()) {
+            if (!component.id.startsWith("gradle-") || !("any".equals(component.abi) || supportedAbis.contains(component.abi))) continue;
+            GradleVersion version = GradleVersion.parse(component.id.substring("gradle-".length()));
+            if (version != null) found.put(version, component.id);
+        }
+        return found;
+    }
+
+    /** Every JDK major the catalog offers for this device's ABI ("jdk-21" -> 21). */
+    public java.util.Set<Integer> jdkComponentMajors() {
+        java.util.Set<Integer> found = new java.util.TreeSet<>();
+        if (catalog == null) return found;
+        for (BuildToolCatalog.Component component : catalog.getComponents()) {
+            if (!component.id.matches("jdk-\\d+") || !supportedAbis.contains(component.abi)) continue;
+            found.add(Integer.parseInt(component.id.substring("jdk-".length())));
+        }
+        return found;
     }
 
     /** Returns the installed home directory, or null (with the reason logged) when installation is impossible. */
