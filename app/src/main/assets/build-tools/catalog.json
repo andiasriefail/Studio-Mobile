@@ -1,6 +1,6 @@
 {
   "schema": "studio-mobile-build-catalog-v1",
-  "catalogVersion": 3,
+  "catalogVersion": 6,
   "status": "partial",
   "components": [
     {
@@ -24,6 +24,116 @@
       "abi": "arm64-v8a",
       "archive": "tar.gz",
       "maxBytes": 100663296
+    },
+    {
+      "id": "jdk-11",
+      "version": "OpenJDK 11 for Android arm64-v8a",
+      "url": "https://github.com/andiasriefail/nlauncher-jre-android-multi/releases/download/jre-bundle-r1/jre11-android-arm64.tar.xz",
+      "installPath": "jdk-11-arm64-v8a.tar.xz",
+      "sha256": "75fb54f03dd02253a12fd53d66c214c2b01c38900f48a25ad47f222ef5d7fe98",
+      "license": "GPL-2.0 WITH Classpath-exception-2.0 (OpenJDK)",
+      "abi": "arm64-v8a",
+      "archive": "tar.xz",
+      "maxBytes": 419430400
+    },
+    {
+      "id": "jdk-11",
+      "version": "OpenJDK 11 for Android armeabi-v7a",
+      "url": "https://github.com/andiasriefail/nlauncher-jre-android-multi/releases/download/jre-bundle-r1/jre11-android-arm.tar.xz",
+      "installPath": "jdk-11-armeabi-v7a.tar.xz",
+      "sha256": "8188f48a796c946f835a3479f199868002fc58fc0a6e5f6edcfb5e249410ee41",
+      "license": "GPL-2.0 WITH Classpath-exception-2.0 (OpenJDK)",
+      "abi": "armeabi-v7a",
+      "archive": "tar.xz",
+      "maxBytes": 419430400
+    },
+    {
+      "id": "jdk-17",
+      "version": "OpenJDK 17 for Android arm64-v8a",
+      "url": "https://github.com/andiasriefail/nlauncher-jre-android-multi/releases/download/jre-bundle-r1/jre17-android-arm64.tar.xz",
+      "installPath": "jdk-17-arm64-v8a.tar.xz",
+      "sha256": "7b778d33d45d25a4a866b074fa13f89752c9ca2473aec7e514d004637ebe123c",
+      "license": "GPL-2.0 WITH Classpath-exception-2.0 (OpenJDK)",
+      "abi": "arm64-v8a",
+      "archive": "tar.xz",
+      "maxBytes": 419430400
+    },
+    {
+      "id": "jdk-17",
+      "version": "OpenJDK 17 for Android armeabi-v7a",
+      "url": "https://github.com/andiasriefail/nlauncher-jre-android-multi/releases/download/jre-bundle-r1/jre17-android-arm.tar.xz",
+      "installPath": "jdk-17-armeabi-v7a.tar.xz",
+      "sha256": "be53efba9dba24b34c231fc363cb7f36700d6c6fc07f095c333cb52cf219f390",
+      "license": "GPL-2.0 WITH Classpath-exception-2.0 (OpenJDK)",
+      "abi": "armeabi-v7a",
+      "archive": "tar.xz",
+      "maxBytes": 419430400
+    },
+    {
+      "id": "jdk-21",
+      "version": "OpenJDK 21 for Android arm64-v8a",
+      "url": "https://github.com/andiasriefail/nlauncher-jre-android-multi/releases/download/jre-bundle-r1/jre21-android-arm64.tar.xz",
+      "installPath": "jdk-21-arm64-v8a.tar.xz",
+      "sha256": "5ac94d9f87d0a5decdba7820986af17de60d3c0ff5ad1f53e5028b5aca970224",
+      "license": "GPL-2.0 WITH Classpath-exception-2.0 (OpenJDK)",
+      "abi": "arm64-v8a",
+      "archive": "tar.xz",
+      "maxBytes": 419430400
+    },
+    {
+      "id": "jdk-21",
+      "version": "OpenJDK 21 for Android armeabi-v7a",
+      "url": "https://github.com/andiasriefail/nlauncher-jre-android-multi/releases/download/jre-bundle-r1/jre21-android-arm.tar.xz",
+      "installPath": "jdk-21-armeabi-v7a.tar.xz",
+      "sha256": "dec68348874588b9669a161e35ce9cf5c4b53aef31c3dca3ffd455ffc8695fdf",
+      "license": "GPL-2.0 WITH Classpath-exception-2.0 (OpenJDK)",
+      "abi": "armeabi-v7a",
+      "archive": "tar.xz",
+      "maxBytes": 419430400
+    },
+    {
+      "id": "jdk-25",
+      "version": "OpenJDK 25 for Android arm64-v8a",
+      "url": "https://github.com/andiasriefail/nlauncher-jre-android-multi/releases/download/jre-bundle-r1/jre25-android-arm64.tar.xz",
+      "installPath": "jdk-25-arm64-v8a.tar.xz",
+      "sha256": "ddb7e225da21beb10d043724fe516603c83bd2de02ff20abb7de8b66b942d4a2",
+      "license": "GPL-2.0 WITH Classpath-exception-2.0 (OpenJDK)",
+      "abi": "arm64-v8a",
+      "archive": "tar.xz",
+      "maxBytes": 419430400
+    },
+    {
+      "id": "jdk-25",
+      "version": "OpenJDK 25 for Android armeabi-v7a",
+      "url": "https://github.com/andiasriefail/nlauncher-jre-android-multi/releases/download/jre-bundle-r1/jre25-android-arm.tar.xz",
+      "installPath": "jdk-25-armeabi-v7a.tar.xz",
+      "sha256": "59ed3c4d3a4588f2b77a293034bbbe6ea2487d515e4cc3dc45604173f879197c",
+      "license": "GPL-2.0 WITH Classpath-exception-2.0 (OpenJDK)",
+      "abi": "armeabi-v7a",
+      "archive": "tar.xz",
+      "maxBytes": 419430400
+    },
+    {
+      "id": "jdk-27",
+      "version": "OpenJDK 27 for Android arm64-v8a",
+      "url": "https://github.com/andiasriefail/nlauncher-jre-android-multi/releases/download/jre-bundle-r1/jre27-android-arm64.tar.xz",
+      "installPath": "jdk-27-arm64-v8a.tar.xz",
+      "sha256": "e18d19d0cfb24f52d1a00355e4de185c580f4096a20da1d6907751500e1961fc",
+      "license": "GPL-2.0 WITH Classpath-exception-2.0 (OpenJDK)",
+      "abi": "arm64-v8a",
+      "archive": "tar.xz",
+      "maxBytes": 419430400
+    },
+    {
+      "id": "jdk-27",
+      "version": "OpenJDK 27 for Android armeabi-v7a",
+      "url": "https://github.com/andiasriefail/nlauncher-jre-android-multi/releases/download/jre-bundle-r1/jre27-android-arm.tar.xz",
+      "installPath": "jdk-27-armeabi-v7a.tar.xz",
+      "sha256": "aeea55db1703fb6715eb0e402239ab021dc7a111751f4bd22cab519a2e10aa41",
+      "license": "GPL-2.0 WITH Classpath-exception-2.0 (OpenJDK)",
+      "abi": "armeabi-v7a",
+      "archive": "tar.xz",
+      "maxBytes": 419430400
     }
   ]
 }
