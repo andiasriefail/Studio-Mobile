@@ -75,7 +75,7 @@ public final class GradleRuntimeManager {
         Set<Integer> jdkAvailable = new TreeSet<>();
         if (!offline) jdkAvailable.addAll(provisioner.jdkComponentMajors());
         for (GradleRuntimeLocator.JdkInstall candidate : locator.findJdkInstalls(externalJavaHome)) jdkAvailable.add(candidate.major);
-        GradleToolchainPlanner.Plan plan = GradleToolchainPlanner.plan(need, matrix, gradleAvailable, jdkAvailable, wrapperUsable);
+        GradleToolchainPlanner.Plan plan = planWithLaunchers(project, need, gradleAvailable, jdkAvailable, wrapperUsable, logger);
         if (!plan.isUsable()) return fail(plan.error);
         for (String note : plan.notes) logger.onInfo(note);
         for (String warning : plan.warnings) logger.onWarning(warning);
@@ -109,7 +109,7 @@ public final class GradleRuntimeManager {
 
         // Launchers always belong to the JDK that was chosen (lib<tool><major>exe.so), never to some other major.
         File javaLauncher = launcherFor("java", jdk.major);
-        if (javaLauncher == null) logger.onWarning("No packaged java launcher (libjava" + jdk.major + "exe.so) in the native library directory; Gradle will be started through its shell script, which Android 10+ refuses to run from app storage.");
+        if (javaLauncher == null) logger.onWarning("No packaged java launcher (" + JdkLauncherSet.fileName("java", jdk.major) + ") in the native library directory; Gradle will be started through its shell script, which Android 10+ refuses to run from app storage.");
 
         // 3. Android SDK and AAPT2
         if (javaLauncher != null) {
@@ -119,11 +119,11 @@ public final class GradleRuntimeManager {
             // AGP (JdkImageTransform, compileSdk 34+) starts javac, jmod and jlink from <jdk>/bin; Gradle may start jar. Like bin/java, none of
             // them can run from app storage (error 13), so each one is linked to a copy packaged in the native library directory.
             for (String tool : new String[] {"javac", "jmod", "jar", "jlink"}) {
-                File toolLauncher = new File(javaLauncher.getParentFile(), "lib" + tool + jdk.major + "exe.so");
-                if (toolLauncher.isFile()) {
+                File toolLauncher = launcherFor(tool, jdk.major);   // same lookup (and same executable check) as the java launcher
+                if (toolLauncher != null) {
                     String toolProblem = JdkLauncherLink.ensureTool(jdk.home, tool, toolLauncher);
                     if (toolProblem != null) logger.onWarning(toolProblem);
-                } else logger.onWarning("No packaged " + tool + " launcher (" + toolLauncher.getName() + ") for JDK " + jdk.major + " in the native library directory; projects with compileSdk 34 or higher can fail when the build starts " + tool + ".");
+                } else logger.onWarning("No packaged " + tool + " launcher (" + JdkLauncherSet.fileName(tool, jdk.major) + ") for JDK " + jdk.major + " in the native library directory; projects with compileSdk 34 or higher can fail when the build starts " + tool + ".");
             }
             String selfTest = NativeToolSelfTest.checkJava(javaLauncher, jdk.home);
             if (selfTest != null) return fail(selfTest);
@@ -156,6 +156,34 @@ public final class GradleRuntimeManager {
         if (offline && !cacheManager.hasCachedDependencies()) return fail("Offline build requested but the Gradle dependency cache is empty. Run one online build first.");
         logger.onInfo("Using JDK " + jdk.major + " at " + jdk.home + (wrapper ? " with the project wrapper." : " with Gradle " + gradleVersion + "."));
         return new Resolution(new GradleRuntime(gradleExecutable, gradleVersion, jdk.home, jdk.major, cacheManager.getGradleUserHome(), androidSdk, aapt2, wrapper, javaLauncher, bootstrapJar, mainClass), null);
+    }
+
+    /**
+     * Plans Gradle and JDK exactly like GradleToolchainPlanner always did (the project decides: AGP, Java level, Gradle window; the lowest JDK
+     * that satisfies them), but only from JDK majors whose launchers are packaged in the APK. A JDK without its lib&lt;tool&gt;&lt;major&gt;exe.so can
+     * be installed and still never start on Android 10+, so choosing it would only move the failure to later. Nothing is forced to one major:
+     * with launchers for 17, 21 and 25 a project that needs 17 gets 17, one that needs 25 gets 25.
+     *
+     * <p>Order: (1) a JDK with java + javac + jmod + jlink when compileSdk is 34+ or unreadable (AGP builds a JDK image with them),
+     * (2) a JDK with at least java, (3) the unrestricted plan, so devices or builds without any packaged launcher behave as before and the
+     * existing warnings explain what is missing.
+     */
+    private GradleToolchainPlanner.Plan planWithLaunchers(File project, GradleProjectRequirements need, Set<GradleVersion> gradleAvailable,
+                                                          Set<Integer> jdkAvailable, boolean wrapperUsable, BuildLogger logger) {
+        GradleToolchainPlanner.Plan open = GradleToolchainPlanner.plan(need, matrix, gradleAvailable, jdkAvailable, wrapperUsable);
+        JdkLauncherSet launchers = JdkLauncherSet.scan(BuildExecutableResolver.registeredNativeLibraryDirectory());
+        if (launchers.isEmpty()) return open;
+        logger.onInfo("Packaged JDK launchers: " + launchers.describe() + ".");
+        int compileSdk = AndroidSdkLayout.readCompileSdk(project);
+        boolean needsImageTools = compileSdk <= 0 || compileSdk >= JdkLauncherSet.IMAGE_MIN_COMPILE_SDK;   // a variable compileSdk is treated as modern
+        GradleToolchainPlanner.Plan plan = null;
+        if (needsImageTools) plan = GradleToolchainPlanner.plan(need, matrix, gradleAvailable, JdkLauncherSet.restrict(jdkAvailable, launchers.majorsForImageBuilds()), wrapperUsable);
+        if (plan == null || !plan.isUsable()) plan = GradleToolchainPlanner.plan(need, matrix, gradleAvailable, JdkLauncherSet.restrict(jdkAvailable, launchers.majorsWithJava()), wrapperUsable);
+        if (!plan.isUsable()) return open;   // no JDK with launchers fits the project; keep the old behavior and its warnings
+        if (open.isUsable() && (open.jdk != plan.jdk || !open.gradle.equals(plan.gradle)))
+            plan.notes.add("JDK " + open.jdk + " with Gradle " + open.gradle + " would fit the project, but the APK has no launchers for JDK " + open.jdk
+                + "; using JDK " + plan.jdk + " with Gradle " + plan.gradle + ", which has them.");
+        return plan;
     }
 
     /** Native launcher packaged for exactly this JDK major (java 17 -> libjava17exe.so). Null when that major has none; no other major is substituted. */

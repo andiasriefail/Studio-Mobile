@@ -307,7 +307,7 @@ public final class AndroidSdkLayout {
     private static void write(File file, String text) throws IOException { Files.write(file.toPath(), text.getBytes(StandardCharsets.UTF_8)); }
 
     /** The compileSdk the project declares in its Gradle scripts, or 0 when it cannot be read statically. */
-    private static int readCompileSdk(File project) {
+    static int readCompileSdk(File project) {
         String[] scripts = {"app/build.gradle", "app/build.gradle.kts", "build.gradle", "build.gradle.kts"};
         for (String script : scripts) {
             File file = new File(project, script);

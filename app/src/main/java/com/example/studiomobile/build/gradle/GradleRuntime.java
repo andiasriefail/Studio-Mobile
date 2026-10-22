@@ -17,7 +17,7 @@ public final class GradleRuntime {
     private final File androidSdk;               // may be null
     private final File aapt2Override;            // may be null
     private final boolean projectWrapper;
-    private final File javaLauncher;             // lib javaexe .so in the native library directory; null when not packaged
+    private final File javaLauncher;             // lib java<major>exe .so of the chosen JDK in the native library directory; null when not packaged
     private final File bootstrapJar;             // gradle-launcher-<v>.jar or gradle-wrapper.jar; null when the script must be used
     private final String mainClass;
 
