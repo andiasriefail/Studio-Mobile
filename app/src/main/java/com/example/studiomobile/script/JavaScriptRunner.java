@@ -1,82 +1,58 @@
 package com.example.studiomobile.script;
 
 import com.example.studiomobile.build.BuildLogger;
-import org.mozilla.javascript.BaseFunction;
-import org.mozilla.javascript.Context;
-import org.mozilla.javascript.ContextFactory;
-import org.mozilla.javascript.RhinoException;
-import org.mozilla.javascript.Scriptable;
-import org.mozilla.javascript.ScriptableObject;
-import org.mozilla.javascript.Undefined;
+import com.example.studiomobile.build.process.BuildProcessRunner;
+import java.io.File;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 /**
- * Runs JavaScript with Rhino inside the app process. This works on every device ABI (Rhino is plain Java).
+ * Runs a .js file with a real Node.js binary (built by andiasriefail/node-android-build).
  *
- * <p>Scripts get the standard ECMAScript objects plus {@code print()} and {@code console.log/info/warn/error()}. They get no access to Java
- * classes ({@code initSafeStandardObjects}, no {@code Packages}/{@code java}) so a script cannot touch the app's own code or data.
- * Rhino runs in interpreted mode (required on Android, there is no JVM bytecode loader) and checks the clock every few thousand
- * instructions, which is how timeouts and Stop work.
+ * <p>Android 10+ only lets an app execute files from its native library directory, so the CI workflow ships {@code bin/node}
+ * as {@code libnodeexe.so} inside the APK (one per ABI: arm64-v8a, armeabi-v7a, x86_64, x86). The binary is self-contained
+ * ({@code --partly-static}), so nothing has to be downloaded at run time. Unlike Rhino, scripts get the full Node API
+ * ({@code require}, {@code fs}, {@code Promise}/async, ES modules, ...).
  */
 public final class JavaScriptRunner {
-    private static final class Stopped extends Error {
-        Stopped(String message) { super(message, null, false, false); }
+    public static final String EXECUTABLE_NAME = "libnodeexe.so";
+
+    private volatile Process activeProcess;
+    private final BuildProcessRunner runner = new BuildProcessRunner(new BuildProcessRunner.ProcessObserver() {
+        @Override public void onStarted(Process process) { activeProcess = process; }
+        @Override public void onFinished(Process process) { if (activeProcess == process) activeProcess = null; }
+    });
+    private final File nativeLibraryDirectory, dataDirectory, cacheDirectory;
+
+    public JavaScriptRunner(File nativeLibraryDirectory, File dataDirectory, File cacheDirectory) {
+        this.nativeLibraryDirectory = nativeLibraryDirectory; this.dataDirectory = dataDirectory; this.cacheDirectory = cacheDirectory;
     }
 
-    private volatile boolean cancelled;
-    private volatile long deadlineNanos;
-
-    public void cancel() { cancelled = true; }
-
-    /** @return 0 on success, 1 when the script threw, -1 on timeout or Stop. */
-    public int run(String source, String fileName, long timeoutSeconds, BuildLogger logger) {
-        cancelled = false;
-        deadlineNanos = System.nanoTime() + timeoutSeconds * 1_000_000_000L;
-        ContextFactory factory = new ContextFactory() {
-            @Override protected Context makeContext() {
-                Context context = super.makeContext();
-                context.setOptimizationLevel(-1);
-                context.setInstructionObserverThreshold(5000);
-                context.setLanguageVersion(Context.VERSION_ES6);
-                return context;
-            }
-            @Override protected void observeInstructionCount(Context context, int instructionCount) {
-                if (cancelled) throw new Stopped("stopped");
-                if (System.nanoTime() > deadlineNanos) throw new Stopped("timed out after " + timeoutSeconds + " s");
-            }
-        };
-        try {
-            return factory.call(context -> {
-                ScriptableObject scope = context.initSafeStandardObjects();
-                BaseFunction info = printer(logger, "");
-                ScriptableObject.putProperty(scope, "print", info);
-                ScriptableObject console = (ScriptableObject) context.newObject(scope);
-                ScriptableObject.putProperty(console, "log", info);
-                ScriptableObject.putProperty(console, "info", info);
-                ScriptableObject.putProperty(console, "warn", printer(logger, "warning: "));
-                ScriptableObject.putProperty(console, "error", printer(logger, "error: "));
-                ScriptableObject.putProperty(scope, "console", console);
-                try {
-                    context.evaluateString(scope, source, fileName, 1, null);
-                    return 0;
-                } catch (RhinoException error) {
-                    logger.onError(error.details() + "\n    at " + fileName + ":" + error.lineNumber() + (error.getScriptStackTrace().isEmpty() ? "" : "\n" + error.getScriptStackTrace().trim()), null);
-                    return 1;
-                }
-            });
-        } catch (Stopped stopped) {
-            logger.onInfo("\n[" + stopped.getMessage() + "]");
-            return -1;
-        }
+    /** True when the Node binary for this device's ABI is packaged in the APK. */
+    public static boolean isBundled(File nativeLibraryDirectory) {
+        File executable = new File(nativeLibraryDirectory, EXECUTABLE_NAME);
+        return executable.isFile() && executable.length() > 0 && executable.canExecute();
     }
 
-    private static BaseFunction printer(BuildLogger logger, String prefix) {
-        return new BaseFunction() {
-            @Override public Object call(Context context, Scriptable scope, Scriptable thisObject, Object[] arguments) {
-                StringBuilder line = new StringBuilder(prefix);
-                for (int i = 0; i < arguments.length; i++) { if (i > 0) line.append(' '); line.append(Context.toString(arguments[i])); }
-                logger.onInfo(line.toString());
-                return Undefined.instance;
-            }
-        };
+    /** Stops the running script, if any. */
+    public void cancel() { Process process = activeProcess; if (process != null) process.destroyForcibly(); }
+
+    /** @return the process exit code, -1 on timeout or Stop. The working directory is the script's folder. */
+    public int run(File script, long timeoutSeconds, BuildLogger logger) throws IOException, InterruptedException {
+        if (!isBundled(nativeLibraryDirectory))
+            throw new IOException("This build of Studio Mobile does not contain Node.js (" + new File(nativeLibraryDirectory, EXECUTABLE_NAME) + " is missing). Build the app with the Node step of .github/workflows/build.yml.");
+        if (!dataDirectory.isDirectory() && !dataDirectory.mkdirs()) throw new IOException("Could not create " + dataDirectory);
+        List<String> command = new ArrayList<>();
+        command.add(new File(nativeLibraryDirectory, EXECUTABLE_NAME).getAbsolutePath());
+        command.add(script.getAbsolutePath());
+        Map<String, String> environment = new HashMap<>();
+        environment.put("HOME", dataDirectory.getAbsolutePath());
+        environment.put("TMPDIR", cacheDirectory.getAbsolutePath());
+        environment.put("NODE_NO_WARNINGS", "1");
+        BuildProcessRunner.Result result = runner.run(command, script.getParentFile(), timeoutSeconds, logger, environment);
+        return result.isTimedOut() ? -1 : result.getExitCode();
     }
 }
