@@ -20,6 +20,11 @@ public final class LanguageUi {
     public static final String IMPORTING = "Importing…";
     public static final String PROJECT_IMPORTED = "Project imported";
     public static final String IMPORT_FAILED = "Import failed: ";
+    public static final String ZIP_PASSWORD_TITLE = "Password required";
+    public static final String ZIP_PASSWORD_MESSAGE = "This ZIP file is password protected. Enter the password to import the project.";
+    public static final String ZIP_PASSWORD_WRONG = "Wrong password. Try again.";
+    public static final String ZIP_PASSWORD_HINT = "Password";
+    public static final String ZIP_PASSWORD_IMPORT = "Import";
     public static final String RENAMED = "Renamed";
     public static final String RENAME_FAILED = "Rename failed";
     public static final String DELETED = "Deleted";
@@ -77,6 +82,10 @@ public final class LanguageUi {
     public static final String INSTALL_PERMISSION_DENIED = "Permission not granted, so the APK was not installed. Press Install APK to try again.";
     public static final String INSTALL_FAILED = "Could not open the installer: ";
     public static final String EXPORT_AAB = "Export AAB";
+    public static final String EXPORT_ZIP = "Export Project To Zip";
+    public static final String EXPORTING_ZIP = "Exporting…";
+    public static final String ZIP_EXPORTED = "Project exported";
+    public static final String ZIP_EXPORT_FAILED = "Export failed: ";
     public static final String AAB_DONE_TITLE = "AAB exported";
     public static String aabDoneMessage(String path) { return "Saved to:\n" + path; }
     public static final String AAB_KEY_TITLE = "Create your own key";

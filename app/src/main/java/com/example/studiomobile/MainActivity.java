@@ -189,6 +189,13 @@ public class MainActivity extends AppCompatActivity {
     private String pendingImportAlias = "", pendingImportStorePassword = "", pendingImportKeyPassword = "";
 
     private final ActivityResultLauncher<String[]> pickZip = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> { if (uri != null) importZip(uri); });
+    /** The project waiting for the user to choose where its ZIP is saved. */
+    private File exportZipProject;
+    /** System "save as" picker: the user chooses the folder and file name, so the ZIP can go anywhere. */
+    private final ActivityResultLauncher<String> pickZipExport = registerForActivityResult(new ActivityResultContracts.CreateDocument("application/zip"), uri -> {
+        File project = exportZipProject; exportZipProject = null;
+        if (uri != null && project != null) exportProjectZip(project, uri);
+    });
     private final ActivityResultLauncher<Uri> pickFolder = registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), uri -> { if (uri != null) importFolder(uri); });
     private final ActivityResultLauncher<String[]> pickIcon = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> { if (uri != null) loadIcon(uri); });
     private final ActivityResultLauncher<String[]> pickUploads = registerForActivityResult(new ActivityResultContracts.OpenMultipleDocuments(), uris -> { if (uris != null && !uris.isEmpty() && uploadTarget != null) uploadFiles(uris, uploadTarget); });
@@ -586,6 +593,7 @@ public class MainActivity extends AppCompatActivity {
             item.findViewById(R.id.project_more).setOnClickListener(v -> showSheet(project.getName(), Arrays.asList(
                 new SheetAction(getString(R.string.keystore), R.drawable.ic_key, false, () -> showKeystore(project)),
                 new SheetAction(LanguageUi.EXPORT_AAB, R.drawable.ic_upload, false, () -> exportAabFlow(project)),
+                new SheetAction(LanguageUi.EXPORT_ZIP, R.drawable.ic_import_zip, false, () -> { exportZipProject = project; pickZipExport.launch(project.getName() + ".zip"); }),
                 new SheetAction(getString(R.string.rename), R.drawable.ic_edit, false, () -> renameProject(project)),
                 new SheetAction(getString(R.string.delete), R.drawable.ic_delete, true, () -> confirmDelete(project, () -> { new ProjectKeys(getFilesDir()).clear(project.getName()); refreshProjects(); })))));
             list.addView(item);
@@ -705,11 +713,31 @@ public class MainActivity extends AppCompatActivity {
         return validName(cleaned) ? cleaned : fallback;
     }
 
-    private void importZip(Uri zipUri) {
+    private void importZip(Uri zipUri) { importZip(zipUri, null, false); }
+
+    /** Asks for the ZIP password, then imports again. {@code wrong} shows that the previous password did not work. */
+    private void askZipPassword(Uri zipUri, boolean wrong) {
+        View view = getLayoutInflater().inflate(R.layout.dialog_input, null);
+        EditText input = view.findViewById(R.id.dialog_input);
+        input.setHint(LanguageUi.ZIP_PASSWORD_HINT);
+        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
+        input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
+        new MaterialAlertDialogBuilder(this).setTitle(LanguageUi.ZIP_PASSWORD_TITLE)
+            .setMessage(wrong ? LanguageUi.ZIP_PASSWORD_WRONG : LanguageUi.ZIP_PASSWORD_MESSAGE)
+            .setView(view)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(LanguageUi.ZIP_PASSWORD_IMPORT, (d, w) -> {
+                char[] password = new char[input.length()];
+                input.getText().getChars(0, password.length, password, 0);   // the password is not trimmed and never stored as a String
+                importZip(zipUri, password, true);
+            }).show();
+    }
+
+    private void importZip(Uri zipUri, char[] password, boolean passwordGiven) {
         String zipName = displayName(zipUri);
         String base = zipName.toLowerCase(Locale.ROOT).endsWith(".zip") ? zipName.substring(0, zipName.length() - 4) : zipName;
         final String projectName = safeName(base, "project");
-        toast(LanguageUi.IMPORTING);
+        if (!passwordGiven) toast(LanguageUi.IMPORTING);
         io.execute(() -> {
             File dest = uniqueFile(projectsDir(), projectName);
             try {
@@ -728,13 +756,58 @@ public class MainActivity extends AppCompatActivity {
                             return new FileOutputStream(file);
                         }
                     },
-                    (written, total) -> { });
+                    (written, total) -> { }, password);
                 runOnUiThread(() -> { toast(LanguageUi.PROJECT_IMPORTED); refreshProjects(); });
+            } catch (ProjectZipImporter.PasswordRequiredException | ProjectZipImporter.WrongPasswordException passwordProblem) {
+                deleteRecursively(dest);
+                boolean wrong = passwordProblem instanceof ProjectZipImporter.WrongPasswordException;
+                runOnUiThread(() -> askZipPassword(zipUri, wrong));
             } catch (Exception e) {
                 deleteRecursively(dest);
                 runOnUiThread(() -> toast(LanguageUi.IMPORT_FAILED + e.getMessage()));
+            } finally {
+                if (password != null) java.util.Arrays.fill(password, '\0');
             }
         });
+    }
+
+    /** Writes the project into the ZIP file the user picked. Build output and IDE caches are left out; a half-written file is removed on failure. */
+    private void exportProjectZip(File project, Uri target) {
+        toast(LanguageUi.EXPORTING_ZIP);
+        io.execute(() -> {
+            try {
+                try (OutputStream raw = getContentResolver().openOutputStream(target, "w")) {
+                    if (raw == null) throw new IOException("Could not open the file you chose.");
+                    try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(new java.io.BufferedOutputStream(raw))) {
+                        addToZip(zip, project, "");
+                    }
+                }
+                runOnUiThread(() -> toast(LanguageUi.ZIP_EXPORTED));
+            } catch (Exception e) {
+                try { android.provider.DocumentsContract.deleteDocument(getContentResolver(), target); } catch (Exception ignored) { }
+                runOnUiThread(() -> toast(LanguageUi.ZIP_EXPORT_FAILED + e.getMessage()));
+            }
+        });
+    }
+
+    private void addToZip(java.util.zip.ZipOutputStream zip, File directory, String prefix) throws IOException {
+        File[] children = directory.listFiles();
+        if (children == null) return;
+        Arrays.sort(children);
+        for (File child : children) {
+            String name = child.getName();
+            if (skipWhenCopying(name) && !name.equals("outputs") || name.equals(".git")) continue;   // build output, caches and git history stay out of the ZIP
+            if (java.nio.file.Files.isSymbolicLink(child.toPath())) continue;
+            String path = prefix + name;
+            if (child.isDirectory()) {
+                zip.putNextEntry(new java.util.zip.ZipEntry(path + "/")); zip.closeEntry();
+                addToZip(zip, child, path + "/");
+            } else if (child.isFile()) {
+                zip.putNextEntry(new java.util.zip.ZipEntry(path));
+                try (InputStream in = new FileInputStream(child)) { copyStream(in, zip); }
+                zip.closeEntry();
+            }
+        }
     }
 
     private void importFolder(Uri treeUri) {
