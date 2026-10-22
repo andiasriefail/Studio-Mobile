@@ -165,70 +165,19 @@ jobs:
           chmod 755 "$dest/libdartaotruntime.so" "$dest/libdartvm.so"
           file "$dest/libdartaotruntime.so" "$dest/libdartvm.so"
           python3 tools/pin_dart_catalog.py
-      - name: Bundle the java launcher (fork JRE release) and register the JDK + Gradle in the catalog
+      - name: Resolve the JDKs and Gradle distributions (tools/gradle-jdk.json) and register them in the catalog
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          jdk_repo=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['repo'])")
-          # OWNER is the placeholder in tools/gradle-jdk.json; by default the JRE fork lives next to this repository.
-          if [ "${jdk_repo%%/*}" = "OWNER" ]; then jdk_repo="${GITHUB_REPOSITORY_OWNER}/${jdk_repo#*/}"; fi
-          tag=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['tag'])")
-          export JDK_REPO="$jdk_repo"
+          # Everything (repo, tag, JDK majors, Gradle versions, which JDK is bundled in the APK, the
+          # java/javac/jmod/jar/jlink launchers of every JDK major) is read from tools/gradle-jdk.json; nothing is hard-coded in this workflow.
           resolved="$RUNNER_TEMP/gradle-jdk-resolved.json"
-          python3 - "$resolved" <<'PY'
-          import json, sys
-          json.dump({"jdk": {}, "gradle": {}}, open(sys.argv[1], "w"))
-          PY
-          record() { python3 - "$resolved" "$@" <<'PY'
-          import json, sys
-          path, kind, key, sha, size = sys.argv[1:6]
-          data = json.load(open(path))
-          if kind == "jdk": data["jdk"][key] = {"sha256": sha, "bytes": int(size)}
-          else: data["gradle"] = {"sha256": sha, "bytes": int(size)}
-          json.dump(data, open(path, "w"))
-          PY
-          }
-          mkdir -p "$RUNNER_TEMP/jre"
-          bundle_abi() {
-            abi="$1"; asset="$2"; machine="$3"
-            if ! gh release download "$tag" --repo "$jdk_repo" --pattern "$asset" --pattern "$asset.sha256" --dir "$RUNNER_TEMP/jre" --clobber; then
-              echo "::warning::$asset is not in release $tag of $jdk_repo; $abi gets no on-device JDK."; return 0
-            fi
-            expected=$(cut -d' ' -f1 "$RUNNER_TEMP/jre/$asset.sha256")
-            sum=$(sha256sum "$RUNNER_TEMP/jre/$asset" | cut -d' ' -f1)
-            [ "$sum" = "$expected" ] || { echo "SHA-256 mismatch for $asset ($sum, release says $expected)" >&2; exit 1; }
-            dest="app/src/main/jniLibs/$abi"
-            mkdir -p "$dest"
-            tar -xJf "$RUNNER_TEMP/jre/$asset" -C "$RUNNER_TEMP/jre" "jre-21/bin/java"
-            cp "$RUNNER_TEMP/jre/jre-21/bin/java" "$dest/libjavaexe.so"
-            chmod 755 "$dest/libjavaexe.so"
-            # AGP starts <jdk>/bin/javac, jmod and jlink to build the JDK image for compileSdk 34+. App storage cannot run them, so each ships like the java launcher.
-            for t in javac jmod jar jlink; do
-              if tar -xJf "$RUNNER_TEMP/jre/$asset" -C "$RUNNER_TEMP/jre" "jre-21/bin/$t"; then
-                cp "$RUNNER_TEMP/jre/jre-21/bin/$t" "$dest/lib${t}exe.so"
-                chmod 755 "$dest/lib${t}exe.so"
-                readelf -h "$dest/lib${t}exe.so" | grep -q "Machine:.*$machine" || { echo "lib${t}exe.so for $abi is not a $machine binary" >&2; exit 1; }
-              else
-                echo "::warning::jre-21/bin/$t is not in $asset; $abi cannot build projects with compileSdk 34 or higher."
-              fi
-            done
-            readelf -h "$dest/libjavaexe.so" | grep -q "Machine:.*$machine" || { echo "libjavaexe.so for $abi is not a $machine binary" >&2; exit 1; }
-            echo "launcher for $abi:"; readelf -d "$dest/libjavaexe.so" | grep -E 'NEEDED|RUNPATH' || true
-            record jdk "$abi" "$sum" "$(stat -c %s "$RUNNER_TEMP/jre/$asset")"
-          }
-          bundle_abi arm64-v8a "$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['assets']['arm64-v8a'])")" AArch64
-          bundle_abi armeabi-v7a "$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['assets']['armeabi-v7a'])")" ARM
-          # Gradle distribution: verify against the checksum Gradle publishes, then pin it in the catalog.
-          gurl=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['gradle']['url'])")
-          gsha=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['gradle']['sha256_url'])")
-          curl -fsSL "$gurl" -o "$RUNNER_TEMP/gradle.zip"
-          expected=$(curl -fsSL "$gsha" | tr -d '[:space:]')
-          sum=$(sha256sum "$RUNNER_TEMP/gradle.zip" | cut -d' ' -f1)
-          [ "$sum" = "$expected" ] || { echo "SHA-256 mismatch for the Gradle distribution ($sum, published $expected)" >&2; exit 1; }
-          record gradle - "$sum" "$(stat -c %s "$RUNNER_TEMP/gradle.zip")"
-          cat "$resolved"; echo
+          python3 tools/resolve_gradle_jdk.py "$resolved"
           python3 tools/pin_gradle_jdk_catalog.py "$resolved"
+          for abi in arm64-v8a armeabi-v7a; do
+            ls app/src/main/jniLibs/$abi/libjava[0-9]*exe.so > /dev/null 2>&1 || echo "::warning::No libjava<major>exe.so for $abi: Gradle projects cannot be built on those phones."
+          done
       - name: Build the JSX/TypeScript transpiler (Sucrase, bundled for QuickJS)
         run: |
           set -euo pipefail
@@ -269,8 +218,8 @@ jobs:
           echo "---- native libraries per ABI ----"
           unzip -l "$apk" | awk '{print $4}' | grep -E '^lib/[^/]+/.+\.so$' | sort
           for abi in armeabi-v7a arm64-v8a; do
-            if ! unzip -l "$apk" | awk '{print $4}' | grep -E "^lib/$abi/libjavaexe\\.so$" > /dev/null; then
-              echo "::warning::libjavaexe.so is missing for $abi: Gradle projects cannot be built on those phones."
+            if ! unzip -l "$apk" | awk '{print $4}' | grep -E "^lib/$abi/libjava[0-9]+exe\\.so$" > /dev/null; then
+              echo "::warning::No libjava<major>exe.so for $abi: Gradle projects cannot be built on those phones."
             fi
             if ! unzip -l "$apk" | awk '{print $4}' | grep -E "^lib/$abi/.*quickjs.*\.so$" > /dev/null; then
               echo "::error::The QuickJS library is missing for $abi, so JSX/TypeScript builds would crash on those phones."
