@@ -2028,7 +2028,7 @@ public class MainActivity extends AppCompatActivity {
         }
         File apk = buildService.getLastApk();
         if (apk == null) return;
-        // Save APK keeps a copy in Studio Mobile/My Apk, named after the app. Install APK only installs: nothing is saved or downloaded.
+        // Save APK keeps a copy in Studio Mobile/My Application, named after the app. Install APK only installs: nothing is saved or downloaded.
         new MaterialAlertDialogBuilder(this).setTitle(LanguageUi.APK_BUILT_TITLE).setMessage(LanguageUi.APK_BUILT_MESSAGE)
             .setPositiveButton(LanguageUi.SAVE_APK, (d, w) -> saveApkToStudioFolder())
             .setNeutralButton(LanguageUi.INSTALL_APK, (d, w) -> installApk(buildService.getLastApk()))

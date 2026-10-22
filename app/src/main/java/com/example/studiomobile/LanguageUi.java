@@ -65,7 +65,7 @@ public final class LanguageUi {
     public static final String BUILD_SUCCESS = "BUILD SUCCESS: ";
     public static final String BUILD_COPY_FAILED = "ERROR: Could not prepare the project copy: ";
     public static final String APK_BUILT_TITLE = "APK built successfully";
-    public static final String APK_BUILT_MESSAGE = "Save APK keeps a copy in Studio Mobile/My Apk. Install APK only installs it.";
+    public static final String APK_BUILT_MESSAGE = "Save APK keeps a copy in Studio Mobile/My Application. Install APK only installs it.";
     public static final String SAVE_APK = "Save APK…";
     public static final String CLOSE = "Close";
     public static final String COPY_PIN_LINE = "Copy pin line";
