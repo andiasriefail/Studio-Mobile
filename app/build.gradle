@@ -193,8 +193,8 @@ dependencies {
     implementation libs.build.bouncycastle
     // .tar.xz extraction (Android-host NDK archives), see SecureTarExtractor
     implementation libs.build.xz
-    // JavaScript runner (Rhino 1.9.1: pure Java, runs on any ABI), see JavaScriptRunner
-    implementation libs.build.rhino
+    // Password-protected project ZIPs (ZipCrypto + AES), see ProjectZipImporter
+    implementation libs.build.zip4j
     // QuickJS runs Sucrase to turn JSX/TypeScript into JavaScript during a build (32-bit and 64-bit), see QuickJsSucraseTranspiler
     implementation libs.build.quickjs
 
