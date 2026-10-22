@@ -1,6 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_title">Settings</string>
+    <string name="settings_debug_title">Studio Mobile Debug Mode</string>
+    <string name="settings_debug_desc">Show a report screen when Studio Mobile crashes, freezes or is closed by the system. Turn off to hide it.</string>
     <string name="settings_wallpaper_title">Change Wallpaper</string>
     <string name="settings_wallpaper_desc">Use your own picture behind the code editor.</string>
     <string name="wallpaper_title">Change Wallpaper</string>
