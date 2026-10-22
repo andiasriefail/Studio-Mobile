@@ -82,7 +82,12 @@ public final class GradleToolchainPlanner {
     }
 
     private static String describeFailure(GradleProjectRequirements need, int wantedJdk, Collection<GradleVersion> gradle, Collection<Integer> jdk, List<String> problems) {
-        StringBuilder text = new StringBuilder("No Gradle/JDK combination fits this project.");
+        StringBuilder text = new StringBuilder();
+        int newestJdk = jdk.isEmpty() ? 0 : java.util.Collections.max(jdk);
+        if (newestJdk > 0 && need.getProjectJavaLevel() > newestJdk)
+            text.append("The project asks for Java ").append(need.getProjectJavaLevel()).append(" (jvmToolchain, JavaLanguageVersion or a source/target level), but the newest JDK available on this device is ")
+                .append(newestJdk).append(". Lower the level to ").append(newestJdk).append(" or less. ");
+        text.append("No Gradle/JDK combination fits this project.");
         text.append(" Project: Gradle ").append(need.getRequiredGradleVersion() == null ? "unspecified" : need.getRequiredGradleVersion())
             .append(", AGP ").append(need.getAgpVersion() == null ? "unknown" : need.getAgpVersion())
             .append(", JDK ").append(wantedJdk).append("+.");

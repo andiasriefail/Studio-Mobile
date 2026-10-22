@@ -154,6 +154,9 @@ public final class GradleRuntimeManager {
             return fail(message.toString());
         }
         if (offline && !cacheManager.hasCachedDependencies()) return fail("Offline build requested but the Gradle dependency cache is empty. Run one online build first.");
+        File toolchainScript = ToolchainInitScript.ensure(cacheManager.getGradleUserHome());
+        if (toolchainScript == null) logger.onWarning("Could not write the toolchain init script; a jvmToolchain lower than JDK " + jdk.major + " will not be mapped to it.");
+        else logger.onInfo("Toolchain mapping is on: a jvmToolchain / java.toolchain request lower than JDK " + jdk.major + " is built with JDK " + jdk.major + " at the requested Java level.");
         logger.onInfo("Using JDK " + jdk.major + " at " + jdk.home + (wrapper ? " with the project wrapper." : " with Gradle " + gradleVersion + "."));
         return new Resolution(new GradleRuntime(gradleExecutable, gradleVersion, jdk.home, jdk.major, cacheManager.getGradleUserHome(), androidSdk, aapt2, wrapper, javaLauncher, bootstrapJar, mainClass), null);
     }

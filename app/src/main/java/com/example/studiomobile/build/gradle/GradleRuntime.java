@@ -117,6 +117,9 @@ public final class GradleRuntime {
         args.add("--console=plain");   // one line per task and per configured project, so the Build screen can show progress
         args.add("-Duser.home=" + (getAndroidUserHome().getParentFile() != null ? getAndroidUserHome().getParentFile().getAbsolutePath() : getAndroidUserHome().getAbsolutePath()));
         args.add("--gradle-user-home"); args.add(gradleUserHome.getAbsolutePath());
+        // Maps a jvmToolchain(N) request lower than this JDK to this JDK (see ToolchainInitScript); written by GradleRuntimeManager.
+        File toolchainScript = new File(gradleUserHome, ToolchainInitScript.FILE_NAME);
+        if (toolchainScript.isFile()) { args.add("-I"); args.add(toolchainScript.getAbsolutePath()); }
         args.add("-Dorg.gradle.java.home=" + javaHome.getAbsolutePath());
         // AGP normally downloads a Linux/x86-64 aapt2 from Maven, which cannot run on Android/ARM.
         if (aapt2Override != null) args.add("-Pandroid.aapt2FromMavenOverride=" + aapt2Override.getAbsolutePath());

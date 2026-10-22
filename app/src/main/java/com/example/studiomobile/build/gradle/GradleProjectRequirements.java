@@ -78,7 +78,7 @@ public final class GradleProjectRequirements {
         for (File script : scripts) {
             if (!script.isFile() || script.length() > 1024 * 1024) continue;
             String text;
-            try { text = new String(Files.readAllBytes(script.toPath()), StandardCharsets.UTF_8); } catch (Exception ignored) { continue; }
+            try { text = com.example.studiomobile.build.JavaLanguageLevel.stripComments(new String(Files.readAllBytes(script.toPath()), StandardCharsets.UTF_8)); } catch (Exception ignored) { continue; }
             highest = Math.max(highest, level(JAVA_VERSION.matcher(text), true));
             highest = Math.max(highest, level(COMPATIBILITY.matcher(text), false));
             highest = Math.max(highest, level(TOOLCHAIN.matcher(text), false));
