@@ -16,6 +16,9 @@ import java.util.List;
 
 /** Runs an Android project's own Gradle build using a locally installed Gradle distribution. */
 public final class GradleBuildPipeline implements BuildPipeline {
+    /** Gradle task that produces the bundle of an Export AAB build. Release, because Google Play refuses debuggable bundles. */
+    static final String BUNDLE_TASK = "bundleRelease";
+
     private final Context context;
     private volatile boolean cancelled;
     private volatile Process activeProcess;
@@ -50,8 +53,15 @@ public final class GradleBuildPipeline implements BuildPipeline {
         }
         GradleRuntime runtime = resolution.runtime;
         List<String> command = runtime.buildCommand(configuration.isOfflineMode(), "assembleDebug");
-        if (configuration.isBundleRequested()) command.add("bundleDebug");   // Export AAB: the APK and the bundle come from the same Gradle run
+        // Export AAB: the debug APK is still built (it is the file the Build screen reports) and the bundle comes from the same Gradle run.
+        // The bundle is the RELEASE variant: bundleDebug is debuggable and Google Play refuses debuggable bundles.
+        if (configuration.isBundleRequested()) command.add(BUNDLE_TASK);
         final boolean projectKey = addInjectedSigning(command, logger);
+        if (configuration.isBundleRequested()) {
+            logger.onInfo("Export AAB: building the release bundle (" + BUNDLE_TASK + "). The release build type of your Gradle files is used (minify, resources, signing).");
+            if (!projectKey) logger.onWarning("No key is set for this project. The bundle is signed only if your build.gradle defines a release signingConfig; "
+                + "otherwise it is left unsigned and Google Play will refuse it. Open Keystore and choose your key.");
+        }
         logger.onInfo("Gradle project detected. Using the project's own Android Gradle Plugin and dependency declarations.");
         logger.onInfo(runtime.runsThroughJava()
             ? "Gradle is started through the packaged java launcher (" + runtime.getJavaLauncher().getAbsolutePath() + ") with JDK " + runtime.getJavaMajor() + " at " + runtime.getJavaHome()
@@ -104,11 +114,12 @@ public final class GradleBuildPipeline implements BuildPipeline {
             File destination = new File(output, "gradle-" + System.currentTimeMillis() + "-" + apk.getName());
             if (!copy(apk, destination)) return failed("Gradle built an APK but Studio Mobile could not copy it to the APK output directory.");
             if (configuration.isBundleRequested()) {
-                File aab = findByExtension(project, ".aab");
+                File aab = findBundle(project);
                 File bundleTarget = new File(output, BuildConfiguration.BUNDLE_FILE_NAME);
-                if (aab == null) return failed("Gradle finished, but no .aab was found under app/build/outputs/bundle.");
+                if (aab == null) return failed("Gradle finished, but no .aab was found under <module>/build/outputs/bundle/release. "
+                    + "Check that the app module applies the com.android.application plugin.");
                 if (!copy(aab, bundleTarget)) return failed("Gradle built an AAB but Studio Mobile could not copy it to the output directory.");
-                if (!projectKey) logger.onWarning("The bundle is signed with the Android debug key because no key is set for this project. Open Keystore and choose your key; Google Play needs your own key.");
+                logger.onInfo("AAB artifact found: " + aab.getAbsolutePath());
             }
             logger.onInfo("APK artifact found: " + destination.getAbsolutePath());
             logger.onWarning("This result confirms Gradle produced an APK artifact; signature verification is not performed by this Gradle adapter yet.");
@@ -273,14 +284,35 @@ public final class GradleBuildPipeline implements BuildPipeline {
         return true;
     }
 
-    private static File findByExtension(File project, String extension) {
+    /**
+     * The bundle Gradle just built, from any module: {@code <module>/build/outputs/bundle/<variant>/*.aab}. The release bundle wins over
+     * any other variant; among equals the newest file wins. The build runs on a fresh copy of the project, so nothing old can be found.
+     */
+    private static File findBundle(File project) {
         List<File> found = new ArrayList<>();
-        collectByExtension(new File(project, "app/build/outputs/bundle"), extension, found);
-        if (found.isEmpty()) collectByExtension(new File(project, "build/outputs/bundle"), extension, found);
-        File newest = null;
-        for (File file : found) if (file.isFile() && file.length() > 0 && (newest == null || file.lastModified() > newest.lastModified())) newest = file;
-        return newest;
+        collectBundleOutputs(project, 0, found);
+        File best = null; boolean bestIsRelease = false;
+        for (File file : found) {
+            if (!file.isFile() || file.length() == 0) continue;
+            boolean release = file.getAbsolutePath().replace('\\', '/').contains("/bundle/release/");
+            if (best == null || (release && !bestIsRelease) || (release == bestIsRelease && file.lastModified() > best.lastModified())) { best = file; bestIsRelease = release; }
+        }
+        return best;
     }
+
+    /** Looks for build/outputs/bundle folders in the project root and its modules (a few levels deep; source and cache folders are skipped). */
+    private static void collectBundleOutputs(File directory, int depth, List<File> output) {
+        File[] children = directory.listFiles();
+        if (children == null || depth > 4) return;
+        for (File child : children) {
+            if (!child.isDirectory()) continue;
+            String name = child.getName();
+            if (name.equals("build")) { collectByExtension(new File(child, "outputs/bundle"), ".aab", output); continue; }
+            if (name.equals("src") || name.equals("node_modules") || name.startsWith(".")) continue;
+            collectBundleOutputs(child, depth + 1, output);
+        }
+    }
+
     private static void collectByExtension(File directory, String extension, List<File> output) {
         File[] children = directory.listFiles();
         if (children == null) return;
