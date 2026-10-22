@@ -543,9 +543,14 @@ public final class ProjectBuildService {
 
     private boolean hasGradleRuntime() {
         File files = appContext.getFilesDir();
-        // The java launcher shipped in the APK lets the pipeline install Gradle and a JDK from the catalog on first use.
+        // A java launcher shipped in the APK lets the pipeline install Gradle and a JDK from the catalog on first use. The APK carries
+        // one per JDK major (lib<tool><major>exe.so, e.g. libjava21exe.so), so any major counts; there is no plain libjavaexe.so.
         File nativeDir = new File(appContext.getApplicationInfo().nativeLibraryDir);
-        return new File(nativeDir, "libjavaexe.so").isFile()
+        // The JDK archives are built for API 29 (Android 10) and newer (nlauncher-jre-android-multi, config.env ANDROID_API), so on older phones
+        // the launchers cannot start a JVM and the local pipeline must be used instead of failing inside Gradle.
+        boolean launcherUsable = android.os.Build.VERSION.SDK_INT >= 29
+            && !com.example.studiomobile.build.gradle.JdkLauncherSet.scan(nativeDir).majorsWithJava().isEmpty();
+        return launcherUsable
             || new File(files, "build-tools/gradle/bin/gradle").isFile()
             || new File(files, "gradle/bin/gradle").isFile()
             || new File(files, "gradle-runtime").isDirectory();
