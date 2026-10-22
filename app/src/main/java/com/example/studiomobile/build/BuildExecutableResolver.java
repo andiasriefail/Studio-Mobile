@@ -19,6 +19,9 @@ public final class BuildExecutableResolver {
     /** Registers ApplicationInfo.nativeLibraryDir. Call once at pipeline creation. */
     public static void registerNativeLibraryDirectory(File directory) { nativeLibraryDirectory = directory; }
 
+    /** The directory registered above, or null before the first pipeline was created. */
+    public static File registeredNativeLibraryDirectory() { return nativeLibraryDirectory; }
+
     /** Every runnable candidate in priority order: native library directory, then root, root/bin, root/native. */
     public static List<File> candidates(File root, String name) {
         List<File> result = new ArrayList<>();
