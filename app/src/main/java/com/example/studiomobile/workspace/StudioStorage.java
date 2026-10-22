@@ -66,7 +66,7 @@ public final class StudioStorage {
 
     public static File projectsDir(Context context) { return dir(root(context), PROJECTS); }
     public static File apkDir(Context context) { return dir(root(context), APKS); }
-    /** Studio Mobile/Export AAB, created when first needed. */
+    /** Studio Mobile/Export AAB, created together with the other folders. */
     public static File exportAabDir(Context context) { return dir(root(context), EXPORT_AAB); }
     /** The Studio Mobile folder itself, created when first needed. */
     public static File rootDir(Context context) { File root = root(context); if (!root.isDirectory()) root.mkdirs(); return root; }
@@ -76,7 +76,7 @@ public final class StudioStorage {
 
     /** Creates the whole folder layout. Safe to call repeatedly. */
     public static void ensureFolders(Context context) {
-        projectsDir(context); apkDir(context); localLibsDir(context); errorLogsDir(context);
+        projectsDir(context); apkDir(context); exportAabDir(context); localLibsDir(context); errorLogsDir(context);
     }
 
     private static File dir(File parent, String relative) {
