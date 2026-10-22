@@ -328,8 +328,13 @@ public final class ProjectBuildService {
             copyDirectory(project, buildRoot);
             com.example.studiomobile.build.BuildFailureReport.begin(readAppName(buildRoot, project.getName()));   // error log file is named after the app
             if (new DebugModeSettings(appContext).isEnabled()) {
-                try { appendInfo(com.example.studiomobile.build.DebugModeInjector.inject(appContext, buildRoot)); }
-                catch (Exception failure) { appendShown("WARNING: Debug Mode could not be added: " + failure.getMessage()); }
+                if (bundle) {
+                    // Export AAB is for Google Play: the crash catcher must never be inside a bundle that is published. The saved Debug Mode choice is not changed.
+                    appendShown("Debug Mode is off for Export AAB: the crash catcher is not added to the bundle.");
+                } else {
+                    try { appendInfo(com.example.studiomobile.build.DebugModeInjector.inject(appContext, buildRoot)); }
+                    catch (Exception failure) { appendShown("WARNING: Debug Mode could not be added: " + failure.getMessage()); }
+                }
             }
 
             try { new ProjectKeys(appContext.getFilesDir()).applyToBuild(new File(appContext.getFilesDir(), "build-tools"), project.getName()); }
@@ -371,7 +376,7 @@ public final class ProjectBuildService {
                     File built = new File(apkOutput, BuildConfiguration.BUNDLE_FILE_NAME);
                     if (!built.isFile()) {
                         succeeded = false;
-                        lastMessage = "The AAB was not created. Export AAB needs the built-in build engine; projects built with Gradle are not supported yet.";
+                        lastMessage = "The AAB was not created. The build finished without producing a bundle; see Build Logs for the reason.";
                         appendShown("ERROR: " + lastMessage);
                     } else {
                         File exported = copyTo(built, new File(StudioStorage.exportAabDir(appContext), appName + ".aab"));
