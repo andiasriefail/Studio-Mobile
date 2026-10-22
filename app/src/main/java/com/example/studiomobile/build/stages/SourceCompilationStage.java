@@ -40,6 +40,8 @@ public final class SourceCompilationStage implements BuildStage {
                 javaRoots.add(root);
             }
         }
+        int javaLevel = JavaLanguageLevel.forProject(context.getProjectDirectory());
+        if (logger != null) logger.onInfo("Compiling as Java " + javaLevel + ".");
         File generated = context.getOutput("generatedSources");
         if (generated != null) java.addAll(BuildProjectFiles.filesWithExtension(generated, ".java"));
 
@@ -52,21 +54,21 @@ public final class SourceCompilationStage implements BuildStage {
         String hint = context.getAttribute("unsupportedProcessors") == null ? "" : "\n" + context.getAttribute("unsupportedProcessors");
 
         if (!kotlin.isEmpty()) {
-            InProcessCompilerEngine.CompilationOutput result = compiler.compileKotlin(kotlin, javaRoots, androidJar, classpath, classes);
+            InProcessCompilerEngine.CompilationOutput result = compiler.compileKotlin(kotlin, javaRoots, androidJar, classpath, classes, javaLevel);
             if (logger != null && !result.getDiagnostics().isEmpty()) logger.onInfo(result.getDiagnostics());
             if (!result.isSuccessful()) throw new IllegalStateException("Kotlin compilation failed. Diagnostics: " + result.getDiagnostics() + hint);
-            requireSupportedOutput(classes);
+            requireSupportedOutput(classes, javaLevel);
         }
         if (!java.isEmpty()) {
             // Java 25 "import module java.base;" cannot be resolved without a JDK module system: expand it to ordinary package imports first.
             ModuleImportExpander.expandAll(java, androidJar, logger);
             List<File> javaClasspath = new ArrayList<>(classpath); javaClasspath.add(classes);
-            java.addAll(runAnnotationProcessors(context, logger, java, androidJar, javaClasspath, !kotlin.isEmpty()));
-            InProcessCompilerEngine.CompilationOutput result = compiler.compileJava(java, androidJar, javaClasspath, classes);
+            java.addAll(runAnnotationProcessors(context, logger, java, androidJar, javaClasspath, !kotlin.isEmpty(), javaLevel));
+            InProcessCompilerEngine.CompilationOutput result = compiler.compileJava(java, androidJar, javaClasspath, classes, javaLevel);
             if (logger != null && !result.getDiagnostics().isEmpty()) logger.onInfo(result.getDiagnostics());
             if (!result.isSuccessful()) throw new IllegalStateException("Java compilation failed. Diagnostics: " + result.getDiagnostics() + hint);
             requireNoCertainCrash(result.getDiagnostics());
-            requireSupportedOutput(classes);
+            requireSupportedOutput(classes, javaLevel);
         }
         if (kotlin.isEmpty() && java.isEmpty() && logger != null)
             logger.onWarning("No Java or Kotlin source files found. APK may contain only resources and manifest.");
@@ -78,7 +80,7 @@ public final class SourceCompilationStage implements BuildStage {
      * Kotlin sources are not visible to processors that need them as input (that is kapt), but compiled Kotlin classes are on the classpath.
      */
     private List<File> runAnnotationProcessors(BuildStageContext context, BuildLogger logger, List<File> javaSources, File androidJar,
-                                               List<File> classpath, boolean hasKotlin) throws Exception {
+                                               List<File> classpath, boolean hasKotlin, int javaLevel) throws Exception {
         List<File> processorJars = context.getFiles("processorJars");
         if (processorJars.isEmpty()) return new ArrayList<>();
         if (logger != null) {
@@ -88,7 +90,7 @@ public final class SourceCompilationStage implements BuildStage {
         File work = new File(context.getWorkingDirectory(), "annotation-processing");
         File generatedDirectory = new File(work, "generated"), resourceDirectory = new File(work, "resources");
         AnnotationProcessingRunner runner = new AnnotationProcessingRunner(tools, new File(tools.getParentFile(), "processor-cache"), compiler);
-        AnnotationProcessingRunner.Result result = runner.run(processorJars, javaSources, androidJar, classpath, generatedDirectory, resourceDirectory, work);
+        AnnotationProcessingRunner.Result result = runner.run(processorJars, javaSources, androidJar, classpath, generatedDirectory, resourceDirectory, work, javaLevel);
         if (!result.diagnostics.isEmpty() && logger != null) logger.onInfo(result.diagnostics);
         if (!result.ran) { if (logger != null) logger.onWarning(result.diagnostics); return new ArrayList<>(); }
         if (!result.successful) throw new IllegalStateException("Annotation processing failed: " + result.diagnostics);
@@ -107,9 +109,9 @@ public final class SourceCompilationStage implements BuildStage {
     }
 
     /** Stops the build if any compiled class is newer than the supported Java level, so a bad APK is never produced. */
-    private static void requireSupportedOutput(File classes) {
+    private static void requireSupportedOutput(File classes, int javaLevel) {
         List<File> dirs = new ArrayList<>(); dirs.add(classes);
-        List<String> problems = ClassFileVersionGuard.findTooNew(dirs, JavaLanguageLevel.REQUIRED_CLASS_MAJOR);
-        if (!problems.isEmpty()) throw new IllegalStateException("Compiled output is not Java " + JavaLanguageLevel.REQUIRED + ": " + problems.get(0));
+        List<String> problems = ClassFileVersionGuard.findTooNew(dirs, JavaLanguageLevel.classMajor(javaLevel));
+        if (!problems.isEmpty()) throw new IllegalStateException("Compiled output is not Java " + javaLevel + ": " + problems.get(0));
     }
 }
