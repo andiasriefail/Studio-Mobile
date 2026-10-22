@@ -1,0 +1,44 @@
+{
+  "schema": "studio-mobile-gradle-compat-v1",
+  "notes": "Data, not code: edit this file when AGP/Gradle publish new rules. 'minGradle' and 'minJdk' come from the AGP release notes (Compatibility table). 'maxGradleBefore' is an exclusive upper bound. All AGP 8.x rows stop before Gradle 9.6 because Gradle 9.6 removed the internal API AGP 8.x uses (the build log says: use Gradle 9.5). 'gradleJdk' lists the newest JDK each Gradle line can run on; 'from' is the first Gradle version of the line. Values marked verify=true were not confirmed against the official table; correct them here, the app needs no rebuild of code.",
+  "unknownMinJdk": 17,
+  "agp": [
+    { "series": "7.0",  "minGradle": "7.0.2",  "minJdk": 11 },
+    { "series": "7.1",  "minGradle": "7.2",    "minJdk": 11 },
+    { "series": "7.2",  "minGradle": "7.3.3",  "minJdk": 11 },
+    { "series": "7.3",  "minGradle": "7.4",    "minJdk": 11 },
+    { "series": "7.4",  "minGradle": "7.5",    "minJdk": 11 },
+    { "series": "8.0",  "minGradle": "8.0",    "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.1",  "minGradle": "8.0",    "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.2",  "minGradle": "8.2",    "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.3",  "minGradle": "8.4",    "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.4",  "minGradle": "8.6",    "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.5",  "minGradle": "8.7",    "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.6",  "minGradle": "8.7",    "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.7",  "minGradle": "8.9",    "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.8",  "minGradle": "8.10.2", "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.9",  "minGradle": "8.11.1", "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.10", "minGradle": "8.11.1", "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.11", "minGradle": "8.13",   "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.12", "minGradle": "8.13",   "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "8.13", "minGradle": "8.13",   "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "series": "9.4",  "minGradle": "9.6.0",  "minJdk": 17 }
+  ],
+  "majorDefaults": [
+    { "major": 7, "minGradle": "7.0.2", "minJdk": 11 },
+    { "major": 8, "minGradle": "8.13",  "minJdk": 17, "maxGradleBefore": "9.6" },
+    { "major": 9, "minGradle": "9.0",   "minJdk": 17 }
+  ],
+  "gradleJdk": [
+    { "from": "9.6",  "maxJdk": 26, "verify": true },
+    { "from": "9.1",  "maxJdk": 25, "verify": true },
+    { "from": "9.0",  "maxJdk": 24, "verify": true },
+    { "from": "8.14", "maxJdk": 24 },
+    { "from": "8.10", "maxJdk": 23 },
+    { "from": "8.8",  "maxJdk": 22 },
+    { "from": "8.5",  "maxJdk": 21 },
+    { "from": "8.3",  "maxJdk": 20 },
+    { "from": "7.6",  "maxJdk": 19 },
+    { "from": "0.0",  "maxJdk": 18 }
+  ]
+}

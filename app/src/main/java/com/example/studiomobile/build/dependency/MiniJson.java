@@ -6,10 +6,10 @@ import java.util.List;
 import java.util.Map;
 
 /** Tiny JSON reader (objects, arrays, strings, numbers, booleans, null) so Gradle .module files parse the same on any JVM. */
-final class MiniJson {
+public final class MiniJson {
     private final String text; private int pos;
     private MiniJson(String text) { this.text = text; }
-    static Object parse(String text) {
+    public static Object parse(String text) {
         MiniJson parser = new MiniJson(text); parser.skip();
         Object value = parser.value(); parser.skip();
         if (parser.pos != text.length()) throw new IllegalArgumentException("Trailing JSON content at " + parser.pos);

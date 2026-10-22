@@ -1,16 +1,53 @@
 {
   "jdk": {
-    "major": 21,
-    "repo": "vhynlain/nlauncher-jre-android",
-    "tag": "jre21-21.0.12.8-nl2",
-    "assets": {
-      "arm64-v8a": "jre21-android-arm64.tar.xz",
-      "armeabi-v7a": "jre21-android-arm.tar.xz"
-    }
+    "repo": "andiasriefail/nlauncher-jre-android-multi",
+    "tag": "jre-bundle-r1",
+    "assetPattern": "jre{major}-android-{arch}.tar.xz",
+    "topDirPattern": "jre-{major}",
+    "abis": {
+      "arm64-v8a": "arm64",
+      "armeabi-v7a": "arm"
+    },
+    "majors": [
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27
+    ],
+    "verifiedMajors": [
+      21
+    ],
+    "bundledMajors": "all",
+    "launcherTools": [
+      "java",
+      "javac",
+      "jmod",
+      "jar",
+      "jlink"
+    ]
   },
   "gradle": {
-    "version": "9.8.1",
-    "url": "https://services.gradle.org/distributions/gradle-9.8.1-bin.zip",
-    "sha256_url": "https://services.gradle.org/distributions/gradle-9.8.1-bin.zip.sha256"
+    "versions": [
+      "8.13",
+      "9.5.0",
+      "9.8.1"
+    ],
+    "requiredVersions": [
+      "9.8.1"
+    ],
+    "urlPattern": "https://services.gradle.org/distributions/gradle-{version}-bin.zip"
   }
 }
