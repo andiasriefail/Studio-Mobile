@@ -70,12 +70,47 @@ public class JavaLanguageLevelTest {
         assertNotNull(JavaLanguageLevel.check(project, logger));
     }
 
-    @Test public void olderLevelsOnlyWarn() throws IOException {
+    @Test public void java8IsAccepted() throws IOException {
         write("build.gradle", "android { compileOptions { sourceCompatibility = JavaVersion.VERSION_1_8 } }");
         assertNull(JavaLanguageLevel.check(project, logger));
-        assertEquals(1, warnings.size());
-        assertTrue(warnings.get(0).contains("Java 8"));
+        assertTrue(warnings.isEmpty());
         assertTrue(errors.isEmpty());
+    }
+
+    @Test public void levelsBelowJava8OnlyWarn() throws IOException {
+        write("build.gradle", "android { compileOptions { sourceCompatibility = JavaVersion.VERSION_1_7 } }");
+        assertNull(JavaLanguageLevel.check(project, logger));
+        assertEquals(1, warnings.size());
+        assertTrue(warnings.get(0).contains("Java 7"));
+        assertTrue(errors.isEmpty());
+    }
+
+    @Test public void projectWithoutDeclaredLevelUsesJava25() throws IOException {
+        write("build.gradle", "plugins { id 'com.android.application' }");
+        assertEquals(25, JavaLanguageLevel.forProject(project));
+    }
+
+    @Test public void projectLevelFollowsTheDeclaration() throws IOException {
+        write("build.gradle", "android { compileOptions { sourceCompatibility = JavaVersion.VERSION_11\n targetCompatibility = JavaVersion.VERSION_11 } }");
+        assertEquals(11, JavaLanguageLevel.forProject(project));
+    }
+
+    @Test public void projectLevelIsTheHighestDeclared() throws IOException {
+        write("build.gradle", "android { compileOptions { sourceCompatibility = JavaVersion.VERSION_11 } }\nkotlin { jvmToolchain(21) }");
+        assertEquals(21, JavaLanguageLevel.forProject(project));
+    }
+
+    @Test public void projectLevelIsClampedToTheSupportedRange() throws IOException {
+        write("build.gradle", "android { compileOptions { sourceCompatibility = JavaVersion.VERSION_1_7 } }");
+        assertEquals(8, JavaLanguageLevel.forProject(project));
+    }
+
+    @Test public void classMajorAndFlagMatchTheLevel() {
+        assertEquals(52, JavaLanguageLevel.classMajor(8));
+        assertEquals(61, JavaLanguageLevel.classMajor(17));
+        assertEquals(JavaLanguageLevel.REQUIRED_CLASS_MAJOR, JavaLanguageLevel.classMajor(JavaLanguageLevel.REQUIRED));
+        assertEquals("1.8", JavaLanguageLevel.flag(8));
+        assertEquals("17", JavaLanguageLevel.flag(17));
     }
 
     @Test public void ignoresLevelsThatAreOnlyInComments() throws IOException {
