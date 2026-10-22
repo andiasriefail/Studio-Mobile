@@ -91,6 +91,11 @@ public final class AnnotationProcessingRunner {
      */
     public Result run(List<File> processorJars, List<File> javaSources, File androidJar, List<File> classpath,
                       File generatedSourceDir, File resourceOutputDir, File workDirectory) throws Exception {
+        return run(processorJars, javaSources, androidJar, classpath, generatedSourceDir, resourceOutputDir, workDirectory, JavaLanguageLevel.REQUIRED);
+    }
+
+    public Result run(List<File> processorJars, List<File> javaSources, File androidJar, List<File> classpath,
+                      File generatedSourceDir, File resourceOutputDir, File workDirectory, int javaLevel) throws Exception {
         List<String> names = discoverProcessorNames(processorJars);
         if (names.isEmpty()) return new Result(false, true, "No annotation processors found in the annotationProcessor classpath.", Collections.<File>emptyList(), names);
         for (File directory : new File[] { generatedSourceDirectory(generatedSourceDir), resourceOutputDir, workDirectory })
@@ -128,7 +133,7 @@ public final class AnnotationProcessingRunner {
             File stubs = CompileStubs.extract(workDirectory);
             if (stubs != null) effectiveClasspath.add(Math.min(1, effectiveClasspath.size()), stubs);
             List<String> options = new ArrayList<>(Arrays.asList(
-                "-proc:only", "-source", String.valueOf(JavaLanguageLevel.REQUIRED), "-target", String.valueOf(JavaLanguageLevel.REQUIRED),
+                "-proc:only", "-source", JavaLanguageLevel.flag(javaLevel), "-target", JavaLanguageLevel.flag(javaLevel),
                 "-encoding", "UTF-8", "-nowarn",
                 "-classpath", joinClasspath(effectiveClasspath),
                 "-d", scratchClasses.getAbsolutePath(),
