@@ -282,6 +282,11 @@ public final class InProcessCompilerEngine {
         clearClassFiles(outputDirectory);
         List<String> args = new ArrayList<>();
         args.add("-no-stdlib"); args.add("-no-reflect");
+        // On Android the compiler is dexed, so PathUtil cannot find its own class as a jar resource
+        // ("Resource not found: /org/jetbrains/kotlin/utils/PathUtil.class"). An explicit -kotlin-home skips that lookup.
+        File kotlinHome = new File(toolsDirectory != null ? toolsDirectory : outputDirectory, toolsDirectory != null ? "kotlin-home" : ".kotlin-home");
+        kotlinHome.mkdirs();
+        args.add("-kotlin-home"); args.add(kotlinHome.getAbsolutePath());
         args.add("-jvm-target"); args.add(JavaLanguageLevel.flag(javaLevel));
         // Kotlin 2.4.20 compiles `when` with several `is` checks to invokedynamic (SwitchBootstraps.typeSwitch) at JVM 21+, which Android does not have.
         // Keep the classic instanceof chain so the DEX never depends on it.
