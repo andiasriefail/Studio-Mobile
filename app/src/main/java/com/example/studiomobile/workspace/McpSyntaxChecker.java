@@ -6,14 +6,10 @@ import com.example.studiomobile.build.nativecode.NativeToolchain;
 import com.example.studiomobile.build.process.BuildProcessRunner;
 import com.example.studiomobile.dart.DartRuntime;
 import com.example.studiomobile.python.PythonRuntime;
-
-import org.mozilla.javascript.Context;
-import org.mozilla.javascript.RhinoException;
+import com.example.studiomobile.script.JavaScriptRunner;
 
 import java.io.File;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
@@ -25,10 +21,10 @@ import java.util.regex.Pattern;
 
 /**
  * Checks the syntax of ONE file for the {@code check_syntax} MCP tool. Nothing is ever executed: Python is only compiled, Dart is only
- * compiled to kernel (never started), C/C++ runs {@code clang -fsyntax-only}, JavaScript is only parsed.
+ * compiled to kernel (never started), C/C++ runs {@code clang -fsyntax-only}, JavaScript is only parsed with {@code node --check}.
  *
  * <p>Python, Dart and C/C++ use the arm64-v8a binaries that ship with the app, so on any other phone they answer
- * {@code NOT CHECKED} with the reason. JavaScript (Rhino) works on every ABI. Every answer starts with {@code language=} and
+ * {@code NOT CHECKED} with the reason. JavaScript uses the Node.js binary bundled for the phone's own ABI. Every answer starts with {@code language=} and
  * {@code RESULT:} (OK, SYNTAX ERRORS or NOT CHECKED) so an AI can read it without guessing.
  */
 public final class McpSyntaxChecker {
@@ -67,7 +63,9 @@ public final class McpSyntaxChecker {
         boolean arm64 = DeviceAbi.supportsArm64(abis);
         StringBuilder text = new StringBuilder();
         text.append("Device ABIs: ").append(abis == null || abis.isEmpty() ? "unknown" : String.join(", ", abis)).append('\n');
-        text.append("- Java and JavaScript: work on every ABI.\n");
+        text.append("- Java: works on every ABI.\n");
+        text.append("- JavaScript (Node.js): works on every ABI. Node in this app: ")
+            .append(nativeLibraryDirectory == null ? "unknown" : JavaScriptRunner.isBundled(nativeLibraryDirectory) ? "bundled" : "missing").append(".\n");
         text.append("- Python, Dart and on-device C/C++: arm64-v8a only. This phone: ")
             .append(arm64 ? "supported" : "NOT supported (do not suggest them; C/C++ can be built on GitHub Actions into src/main/jniLibs)").append(".\n");
         if (arm64 && nativeLibraryDirectory != null) {
@@ -108,27 +106,23 @@ public final class McpSyntaxChecker {
         return null;
     }
 
-    // ------------------------------------------------------------------ JavaScript (Rhino, every ABI)
+    // ------------------------------------------------------------------ JavaScript (Node.js, every ABI)
 
-    private String checkJavaScript(File file, String display) throws IOException {
-        String source = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
-        Context context = Context.enter();
-        try {
-            context.setOptimizationLevel(-1);
-            context.setLanguageVersion(Context.VERSION_ES6);
-            context.compileString(source, display, 1, null);
-            return report("javascript", "OK", "No syntax errors found. The file was only parsed, not run." + jsNote());
-        } catch (RhinoException error) {
-            return report("javascript", "SYNTAX ERRORS", display + ":" + error.lineNumber() + ": " + error.details() + jsNote());
-        } catch (RuntimeException error) {
-            return report("javascript", "NOT CHECKED", "The parser failed: " + error);
-        } finally {
-            Context.exit();
-        }
-    }
-
-    private static String jsNote() {
-        return "\nChecked with Rhino (ES6), the same engine as Run in the app. import/export modules and the newest syntax are not supported by it.";
+    private String checkJavaScript(File file, String display) throws IOException, InterruptedException {
+        if (nativeLibraryDirectory == null)
+            return report("javascript", "NOT CHECKED", "The app's native library folder is unknown here, so Node.js cannot be located.");
+        if (!JavaScriptRunner.isBundled(nativeLibraryDirectory))
+            return report("javascript", "NOT CHECKED", "This build of the app does not contain Node.js (" + JavaScriptRunner.EXECUTABLE_NAME + " is missing). Ask the user to rebuild the app with the Node step of build.yml.");
+        if (!cacheDirectory.isDirectory()) cacheDirectory.mkdirs();
+        File home = new File(filesDirectory, "node-home");
+        if (!home.isDirectory()) home.mkdirs();
+        List<String> command = new ArrayList<>(Arrays.asList(new File(nativeLibraryDirectory, JavaScriptRunner.EXECUTABLE_NAME).getAbsolutePath(), "--check", file.getAbsolutePath()));
+        java.util.Map<String, String> environment = new java.util.HashMap<>();
+        environment.put("HOME", home.getAbsolutePath());
+        environment.put("TMPDIR", cacheDirectory.getAbsolutePath());
+        Collector output = new Collector();
+        BuildProcessRunner.Result result = new BuildProcessRunner().run(command, file.getParentFile(), TIMEOUT_SECONDS, output, environment);
+        return finish("javascript", file, display, result, output, "\nChecked with node --check (CommonJS rules for .js files); the file was only parsed, not run.");
     }
 
     // ------------------------------------------------------------------ Python (arm64-v8a)
