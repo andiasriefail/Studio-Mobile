@@ -1,44 +1,90 @@
 package com.example.studiomobile.build.gradle;
 
+import com.example.studiomobile.build.dependency.MiniJson;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 /**
- * Minimum Gradle and JDK versions required by each Android Gradle Plugin (AGP) series.
- * Values follow the AGP release notes "compatibility" table. Versions newer than the table
- * produce a warning instead of a failure so a newer AGP is never blocked by stale app data.
+ * AGP / Gradle / JDK compatibility rules, read from assets/build-tools/gradle-compat.json instead of being compiled in.
+ * A rule that is not in the file is never guessed: the answer is then "unknown" (known == false) and the caller must not
+ * block the build because of stale app data.
  */
 public final class GradleCompatibilityMatrix {
+    /** What one AGP version needs. Null bounds mean "not restricted / not known". */
     public static final class Requirement {
-        public final GradleVersion minimumGradle; public final int minimumJdk; public final boolean knownAgp;
-        Requirement(String gradle, int jdk, boolean known) { this.minimumGradle = GradleVersion.parse(gradle); this.minimumJdk = jdk; this.knownAgp = known; }
+        public final GradleVersion minimumGradle;
+        public final GradleVersion maximumGradleExclusive;
+        public final int minimumJdk;
+        public final boolean knownAgp;
+        Requirement(GradleVersion min, GradleVersion maxBefore, int jdk, boolean known) {
+            this.minimumGradle = min; this.maximumGradleExclusive = maxBefore; this.minimumJdk = jdk; this.knownAgp = known;
+        }
     }
-    // {agp major.minor, minimum Gradle, minimum JDK}
-    private static final String[][] TABLE = {
-        {"7.0", "7.0.2", "11"}, {"7.1", "7.2", "11"}, {"7.2", "7.3.3", "11"}, {"7.3", "7.4", "11"}, {"7.4", "7.5", "11"},
-        {"8.0", "8.0", "17"}, {"8.1", "8.0", "17"}, {"8.2", "8.2", "17"}, {"8.3", "8.4", "17"}, {"8.4", "8.6", "17"},
-        {"8.5", "8.7", "17"}, {"8.6", "8.7", "17"}, {"8.7", "8.9", "17"}, {"8.8", "8.10.2", "17"}, {"8.9", "8.11.1", "17"},
-        {"8.10", "8.11.1", "17"}, {"8.11", "8.13", "17"}, {"8.12", "8.13", "17"}, {"8.13", "8.13", "17"}
-    };
+
+    private static final class Row {
+        final int major, minor; final GradleVersion min, maxBefore; final int jdk;
+        Row(int major, int minor, GradleVersion min, GradleVersion maxBefore, int jdk) { this.major = major; this.minor = minor; this.min = min; this.maxBefore = maxBefore; this.jdk = jdk; }
+    }
+    private static final class GradleJdk {
+        final GradleVersion from; final int maxJdk;
+        GradleJdk(GradleVersion from, int maxJdk) { this.from = from; this.maxJdk = maxJdk; }
+    }
+
+    private final List<Row> exact = new ArrayList<>();
+    private final List<Row> majorDefaults = new ArrayList<>();
+    private final List<GradleJdk> gradleJdk = new ArrayList<>();
+    private int unknownMinJdk = 8;
+
     private GradleCompatibilityMatrix() { }
 
-    public static Requirement forAgp(GradleVersion agp) {
-        if (agp == null) return new Requirement("0.0", 8, false);
-        for (String[] row : TABLE) {
-            GradleVersion key = GradleVersion.parse(row[0]);
-            if (key.getMajor() == agp.getMajor() && key.getMinor() == agp.getMinor()) return new Requirement(row[1], Integer.parseInt(row[2]), true);
+    /** A matrix without any rule: every answer is "unknown". Used when the data file is missing. */
+    public static GradleCompatibilityMatrix empty() { return new GradleCompatibilityMatrix(); }
+
+    @SuppressWarnings("unchecked")
+    public static GradleCompatibilityMatrix parse(String json) {
+        GradleCompatibilityMatrix matrix = new GradleCompatibilityMatrix();
+        Map<String, Object> root = (Map<String, Object>) MiniJson.parse(json);
+        Object unknown = root.get("unknownMinJdk");
+        if (unknown != null) matrix.unknownMinJdk = Integer.parseInt(unknown.toString());
+        for (Object item : list(root.get("agp"))) {
+            Map<String, Object> row = (Map<String, Object>) item;
+            GradleVersion series = GradleVersion.parse(text(row, "series"));
+            if (series == null) throw new IllegalArgumentException("Bad AGP series in gradle-compat.json: " + row);
+            matrix.exact.add(new Row(series.getMajor(), series.getMinor(), GradleVersion.parse(text(row, "minGradle")),
+                GradleVersion.parse(text(row, "maxGradleBefore")), Integer.parseInt(text(row, "minJdk"))));
         }
-        // Unknown series: assume the newest known requirement for >= 8, otherwise unknown.
-        if (agp.getMajor() >= 8) return new Requirement("8.13", 17, false);
-        return new Requirement("0.0", 8, false);
+        for (Object item : list(root.get("majorDefaults"))) {
+            Map<String, Object> row = (Map<String, Object>) item;
+            matrix.majorDefaults.add(new Row(Integer.parseInt(text(row, "major")), -1, GradleVersion.parse(text(row, "minGradle")),
+                GradleVersion.parse(text(row, "maxGradleBefore")), Integer.parseInt(text(row, "minJdk"))));
+        }
+        for (Object item : list(root.get("gradleJdk"))) {
+            Map<String, Object> row = (Map<String, Object>) item;
+            matrix.gradleJdk.add(new GradleJdk(GradleVersion.parse(text(row, "from")), Integer.parseInt(text(row, "maxJdk"))));
+        }
+        // Newest line first, whatever order the file lists them in.
+        java.util.Collections.sort(matrix.gradleJdk, new java.util.Comparator<GradleJdk>() {
+            @Override public int compare(GradleJdk a, GradleJdk b) { return b.from.compareTo(a.from); }
+        });
+        return matrix;
     }
 
-    /** Highest JDK major version a Gradle release can run on (Gradle compatibility matrix). */
-    public static int maximumJdk(GradleVersion gradle) {
-        if (gradle == null) return 21;
-        if (gradle.compareTo(GradleVersion.parse("8.14")) >= 0) return 24;
-        if (gradle.compareTo(GradleVersion.parse("8.10")) >= 0) return 23;
-        if (gradle.compareTo(GradleVersion.parse("8.8")) >= 0) return 22;
-        if (gradle.compareTo(GradleVersion.parse("8.5")) >= 0) return 21;
-        if (gradle.compareTo(GradleVersion.parse("8.3")) >= 0) return 20;
-        if (gradle.compareTo(GradleVersion.parse("7.6")) >= 0) return 19;
-        return 18;
+    private static List<?> list(Object value) { return value instanceof List ? (List<?>) value : new ArrayList<Object>(); }
+    private static String text(Map<String, Object> row, String key) { Object value = row.get(key); return value == null ? null : value.toString(); }
+
+    /** Rules for this AGP. Exact series first, then the major default (known == false), otherwise no restriction. */
+    public Requirement forAgp(GradleVersion agp) {
+        if (agp == null) return new Requirement(null, null, 8, false);
+        for (Row row : exact) if (row.major == agp.getMajor() && row.minor == agp.getMinor()) return new Requirement(row.min, row.maxBefore, row.jdk, true);
+        for (Row row : majorDefaults) if (row.major == agp.getMajor()) return new Requirement(row.min, row.maxBefore, row.jdk, false);
+        return new Requirement(null, null, unknownMinJdk, false);
+    }
+
+    /** Newest JDK major this Gradle can run on; Integer.MAX_VALUE when the file has no rule for it (never blocks). */
+    public int maximumJdk(GradleVersion gradle) {
+        if (gradle == null) return Integer.MAX_VALUE;
+        for (GradleJdk row : gradleJdk) if (gradle.compareTo(row.from) >= 0) return row.maxJdk;
+        return Integer.MAX_VALUE;
     }
 }
