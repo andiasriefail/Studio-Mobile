@@ -260,7 +260,7 @@ public class MainActivity extends AppCompatActivity {
         refreshProjects();
     }
 
-    @Override protected void onResume() { super.onResume(); onStorageAccessChanged(); continueInstallAfterPermission(); }
+    @Override protected void onResume() { super.onResume(); wallpaperUi.resumeVideo(); onStorageAccessChanged(); continueInstallAfterPermission(); }
 
     /** The APK waiting for the "install unknown apps" permission. Set when the permission screen is opened, cleared when the user comes back. */
     private File pendingInstallApk;
@@ -289,8 +289,8 @@ public class MainActivity extends AppCompatActivity {
         if (buildService.getState() == ProjectBuildService.State.FAILED) showChecksumFailure(buildService.takeChecksumFailure());
     }
     @Override protected void onStop() { super.onStop(); mcpUi.onStop(); ProjectChangeBus.removeListener(changeListener); }
-    @Override protected void onPause() { super.onPause(); if (screen == Screen.EDITOR) saveCurrent(false); }
-    @Override protected void onDestroy() { super.onDestroy(); if (screen == Screen.PREVIEW && screenView != null) PreviewRenderer.release(screenView); uiHandler.removeCallbacksAndMessages(null); if (buildService != null) buildService.removeListener(buildListener); previewAbort.abort(); syncAbort.abort(); previewExecutor.shutdownNow(); liveExecutor.shutdownNow(); io.shutdown(); projectsExecutor.shutdownNow(); }
+    @Override protected void onPause() { super.onPause(); wallpaperUi.pauseVideo(); if (screen == Screen.EDITOR) saveCurrent(false); }
+    @Override protected void onDestroy() { super.onDestroy(); wallpaperUi.releaseVideo(); if (screen == Screen.PREVIEW && screenView != null) PreviewRenderer.release(screenView); uiHandler.removeCallbacksAndMessages(null); if (buildService != null) buildService.removeListener(buildListener); previewAbort.abort(); syncAbort.abort(); previewExecutor.shutdownNow(); liveExecutor.shutdownNow(); io.shutdown(); projectsExecutor.shutdownNow(); }
 
     // ------------------------------------------------------------------ navigation helpers
 
@@ -299,6 +299,7 @@ public class MainActivity extends AppCompatActivity {
     int color(int res) { return ContextCompat.getColor(this, res); }
 
     View show(Screen next, int layout, boolean lightBars, int backgroundColor) {
+        wallpaperUi.releaseVideo();   // the live wallpaper only plays in the code editor: Home, Preview, Build, ... always stop it
         if (screen == Screen.PREVIEW && screenView != null) PreviewRenderer.release(screenView);
         previewPhone = null;
         if (next != Screen.PREVIEW) previewAbort.abort();
