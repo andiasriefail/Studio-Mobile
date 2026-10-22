@@ -35,14 +35,18 @@ public final class SelfCrashActivity extends Activity {
         root.setPadding(pad, pad * 2, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText(log.startsWith("=== STUDIO MOBILE FROZE") ? "Studio Mobile is frozen" : "Studio Mobile crashed");
+        final boolean frozen = log.startsWith("=== STUDIO MOBILE FROZE");
+        final boolean closedBySystem = log.startsWith("=== STUDIO MOBILE WAS CLOSED BY THE SYSTEM");
+        title.setText(frozen ? "Studio Mobile is frozen" : closedBySystem ? "Studio Mobile was closed by the system" : "Studio Mobile crashed");
         title.setTextColor(Color.parseColor("#B00020"));
         title.setTextSize(22);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(title);
 
         TextView hint = new TextView(this);
-        hint.setText("Studio Mobile's own Debug Mode caught this before it could close silently. Reports are also saved in the \"App Crash Logs\" folder (the newest 10 are kept). Copy the log and send it to your AI assistant.");
+        hint.setText(closedBySystem
+            ? "Last time, Android ended Studio Mobile (or one of its processes) without a Java error: for example out of memory, a native crash or a freeze. This is a record of that earlier event, not of something that just happened. Reports are also saved in the \"App Crash Logs\" folder (the newest 10 are kept). Copy the log and send it to your AI assistant."
+            : "Studio Mobile's own Debug Mode caught this before it could close silently. Reports are also saved in the \"App Crash Logs\" folder (the newest 10 are kept). Copy the log and send it to your AI assistant.");
         hint.setTextColor(Color.parseColor("#555555"));
         hint.setTextSize(14);
         hint.setPadding(0, pad / 2, 0, pad / 2);

@@ -425,6 +425,10 @@ public class MainActivity extends AppCompatActivity {
     private void showSettings() {
         show(Screen.SETTINGS, R.layout.screen_settings, true, R.color.cosmic_white);
         click(R.id.settings_back, this::goBack);
+        CheckBox debugCheck = screenView.findViewById(R.id.settings_debug_check);
+        debugCheck.setChecked(SelfCrashCatcher.isEnabled(this));   // on unless the user turned it off
+        debugCheck.setOnCheckedChangeListener((button, checked) -> SelfCrashCatcher.setEnabled(this, checked));
+        click(R.id.settings_debug, debugCheck::toggle);
         click(R.id.settings_wallpaper, this::showWallpaper);
     }
 
