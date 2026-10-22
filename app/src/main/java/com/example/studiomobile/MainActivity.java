@@ -93,7 +93,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class MainActivity extends AppCompatActivity {
-    private enum Screen { HOME, CREATE, EDITOR, PREVIEW, BUILD, KEYSTORE, MCP, SETTINGS, WALLPAPER }
+    enum Screen { HOME, CREATE, EDITOR, PREVIEW, BUILD, KEYSTORE, MCP, SETTINGS, WALLPAPER }
 
     private static final class SheetAction {
         final String label; final int icon; final boolean danger; final Runnable run;
@@ -127,32 +127,29 @@ public class MainActivity extends AppCompatActivity {
     private static final Pattern PACKAGE_NAME = Pattern.compile("^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$");
     private static final int MIN_SDK_LOWEST = 21, SDK_HIGHEST = 37;
 
-    private final ExecutorService io = Executors.newSingleThreadExecutor();
-    private FrameLayout container;
-    private View screenView;
-    private Screen screen = Screen.HOME;
+    final ExecutorService io = Executors.newSingleThreadExecutor();
+    FrameLayout container;
+    View screenView;
+    Screen screen = Screen.HOME;
     private int insetTop;
 
     // Projects and editor
-    private File currentProject;
-    private File openedFile;
+    File currentProject;
+    File openedFile;
     private static final int MAX_TABS = 5;
     /** Open files in tab order (oldest first). The active one is {@link #openedFile}. */
-    private final List<File> openTabs = new ArrayList<>();
+    final List<File> openTabs = new ArrayList<>();
     private File uploadTarget;
-    private boolean wrapOn = true, dirty, loadingText;
+    boolean wrapOn = true, dirty, loadingText;
     private EditText codeEditor;
     private TextView codeGutter;
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable highlightRunnable = () -> { if (codeEditor != null) highlight(codeEditor.getText()); };
-    private final Set<String> expanded = new HashSet<>();
+    final Set<String> expanded = new HashSet<>();
 
     // Create wizard
     private int wizardStep, versionCode = 1, minSdk = 23, targetSdk = 35;
     private Bitmap iconBitmap;
-    /** Decoded wallpaper, kept while its stamp is unchanged so reopening the editor does not decode it again. */
-    private Bitmap wallpaperBitmap;
-    private long wallpaperStamp = -1;
 
     // Preview
     private int previewToken;
@@ -171,45 +168,25 @@ public class MainActivity extends AppCompatActivity {
     private PreviewRenderer.PhoneView previewPhone;
 
     // Build
-    private ProjectBuildService buildService;
-    private final McpRelayService.Listener relayListener = () -> runOnUiThread(this::renderMcpRelay);
-    private final ActivityResultLauncher<String> notificationPermission = registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> { });
+    ProjectBuildService buildService;
     private final ProjectBuildService.Listener buildListener = new ProjectBuildService.Listener() {
         @Override public void onLogAppended(String line) { runOnUiThread(() -> scheduleBuildRender()); }
         @Override public void onStateChanged(ProjectBuildService.State state) { runOnUiThread(() -> onBuildStateChanged(state)); }
     };
 
     // Keystore
-    private File pendingExportSource;
-    private File keyProject;                 // the project whose key is shown, imported or replaced
-    private Runnable afterKeyImport;
-    private boolean bundleNext;              // the next build is an Export AAB build
-    private ProjectKeys.Details shownKey;
-    private boolean keyPasswordVisible;
-    private String pendingImportAlias = "", pendingImportStorePassword = "", pendingImportKeyPassword = "";
+    boolean bundleNext;              // the next build is an Export AAB build
 
-    private final ActivityResultLauncher<String[]> pickZip = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> { if (uri != null) importZip(uri); });
-    /** The project waiting for the user to choose where its ZIP is saved. */
-    private File exportZipProject;
-    /** System "save as" picker: the user chooses the folder and file name, so the ZIP can go anywhere. */
-    private final ActivityResultLauncher<String> pickZipExport = registerForActivityResult(new ActivityResultContracts.CreateDocument("application/zip"), uri -> {
-        File project = exportZipProject; exportZipProject = null;
-        if (uri != null && project != null) exportProjectZip(project, uri);
-    });
-    private final ActivityResultLauncher<Uri> pickFolder = registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), uri -> { if (uri != null) importFolder(uri); });
     private final ActivityResultLauncher<String[]> pickIcon = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> { if (uri != null) loadIcon(uri); });
     private final ActivityResultLauncher<String[]> pickUploads = registerForActivityResult(new ActivityResultContracts.OpenMultipleDocuments(), uris -> { if (uris != null && !uris.isEmpty() && uploadTarget != null) uploadFiles(uris, uploadTarget); });
-    private final ActivityResultLauncher<String[]> pickKeystore = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> { if (uri != null) importKeystore(uri, pendingImportAlias, pendingImportStorePassword, pendingImportKeyPassword); });
-    /** The wallpaper is chosen in the gallery (images only), not in the file manager that OpenDocument shows. */
-    private final ActivityResultLauncher<Void> pickWallpaper = registerForActivityResult(new androidx.activity.result.contract.ActivityResultContract<Void, Uri>() {
-        @Override public android.content.Intent createIntent(Context context, Void input) {
-            return new android.content.Intent(android.content.Intent.ACTION_PICK).setDataAndType(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, "image/*");
-        }
-        @Override public Uri parseResult(int resultCode, android.content.Intent data) { return resultCode == RESULT_OK && data != null ? data.getData() : null; }
-    }, uri -> { if (uri != null) importWallpaper(uri); });
-    /** Used only when the phone has no gallery app that handles the request above. */
-    private final ActivityResultLauncher<String[]> pickWallpaperFromFiles = registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> { if (uri != null) importWallpaper(uri); });
-    private final ActivityResultLauncher<String> exportKeystoreLauncher = registerForActivityResult(new ActivityResultContracts.CreateDocument("application/x-pkcs12"), uri -> { if (uri != null) exportKeystoreTo(uri); });
+
+    // Features that live in their own Kotlin files (same package). Each one registers its own result launchers.
+    final WallpaperUi wallpaperUi = new WallpaperUi(this);
+    final ZipUi zipUi = new ZipUi(this);
+    final RunUi runUi = new RunUi(this);
+    final McpUi mcpUi = new McpUi(this);
+    final KeystoreUi keystoreUi = new KeystoreUi(this);
+    final AabExportUi aabUi = new AabExportUi(this, keystoreUi);
 
     @Override protected void onCreate(Bundle saved) {
         super.onCreate(saved);
@@ -304,24 +281,24 @@ public class MainActivity extends AppCompatActivity {
 
     @Override protected void onStart() {
         super.onStart();
-        McpRelayService.addListener(relayListener); renderMcpRelay();
+        mcpUi.onStart();
         ProjectChangeBus.addListener(changeListener);
         // Changes made while the screen was off or the app in the background: catch up with what is on disk now.
         if (currentProject != null) onProjectChanged(currentProject, true);
         // A build that failed its checksum check while the app was in the background: show the dialog now.
         if (buildService.getState() == ProjectBuildService.State.FAILED) showChecksumFailure(buildService.takeChecksumFailure());
     }
-    @Override protected void onStop() { super.onStop(); McpRelayService.removeListener(relayListener); ProjectChangeBus.removeListener(changeListener); }
+    @Override protected void onStop() { super.onStop(); mcpUi.onStop(); ProjectChangeBus.removeListener(changeListener); }
     @Override protected void onPause() { super.onPause(); if (screen == Screen.EDITOR) saveCurrent(false); }
     @Override protected void onDestroy() { super.onDestroy(); if (screen == Screen.PREVIEW && screenView != null) PreviewRenderer.release(screenView); uiHandler.removeCallbacksAndMessages(null); if (buildService != null) buildService.removeListener(buildListener); previewAbort.abort(); syncAbort.abort(); previewExecutor.shutdownNow(); liveExecutor.shutdownNow(); io.shutdown(); projectsExecutor.shutdownNow(); }
 
     // ------------------------------------------------------------------ navigation helpers
 
-    private int dp(float n) { return (int) (n * getResources().getDisplayMetrics().density + 0.5f); }
-    private void toast(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
-    private int color(int res) { return ContextCompat.getColor(this, res); }
+    int dp(float n) { return (int) (n * getResources().getDisplayMetrics().density + 0.5f); }
+    void toast(String message) { Toast.makeText(this, message, Toast.LENGTH_LONG).show(); }
+    int color(int res) { return ContextCompat.getColor(this, res); }
 
-    private View show(Screen next, int layout, boolean lightBars, int backgroundColor) {
+    View show(Screen next, int layout, boolean lightBars, int backgroundColor) {
         if (screen == Screen.PREVIEW && screenView != null) PreviewRenderer.release(screenView);
         previewPhone = null;
         if (next != Screen.PREVIEW) previewAbort.abort();
@@ -358,7 +335,7 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void goBack() {
+    void goBack() {
         switch (screen) {
             case HOME: finish(); break;
             case CREATE: if (wizardStep > 0) { wizardStep--; refreshWizard(); } else showHome(); break;
@@ -400,11 +377,11 @@ public class MainActivity extends AppCompatActivity {
             .show();
     }
 
-    private void click(int id, Runnable action) { screenView.findViewById(id).setOnClickListener(v -> action.run()); }
+    void click(int id, Runnable action) { screenView.findViewById(id).setOnClickListener(v -> action.run()); }
 
     // ------------------------------------------------------------------ home
 
-    private File projectsDir() {
+    File projectsDir() {
         return StudioStorage.projectsDir(this);
     }
 
@@ -413,9 +390,9 @@ public class MainActivity extends AppCompatActivity {
         currentProject = null; openedFile = null; openTabs.clear(); codeEditor = null; dirty = false;
         show(Screen.HOME, R.layout.screen_home, false, R.color.cosmic_white);
         click(R.id.home_create, this::showCreate);
-        click(R.id.home_import_zip, () -> pickZip.launch(new String[]{"application/zip", "application/x-zip-compressed", "application/octet-stream"}));
-        click(R.id.home_import_folder, () -> pickFolder.launch(null));
-        click(R.id.home_mcp, this::showMcp);
+        click(R.id.home_import_zip, zipUi::chooseZip);
+        click(R.id.home_import_folder, zipUi::chooseFolder);
+        click(R.id.home_mcp, mcpUi::show);
         click(R.id.home_settings, this::showSettings);
         refreshProjects();
     }
@@ -429,118 +406,13 @@ public class MainActivity extends AppCompatActivity {
         debugCheck.setChecked(SelfCrashCatcher.isEnabled(this));   // on unless the user turned it off
         debugCheck.setOnCheckedChangeListener((button, checked) -> SelfCrashCatcher.setEnabled(this, checked));
         click(R.id.settings_debug, debugCheck::toggle);
-        click(R.id.settings_wallpaper, this::showWallpaper);
-    }
-
-    private void showWallpaper() {
-        show(Screen.WALLPAPER, R.layout.screen_wallpaper, true, R.color.cosmic_white);
-        click(R.id.wallpaper_back, this::goBack);
-        click(R.id.wallpaper_choose, () -> {
-            try { pickWallpaper.launch(null); }
-            catch (android.content.ActivityNotFoundException noGallery) { pickWallpaperFromFiles.launch(new String[]{"image/*"}); }
-        });
-        click(R.id.wallpaper_remove, () -> {
-            WallpaperSettings stored = new WallpaperSettings(this);
-            if (!stored.isSet()) return;
-            stored.clear();
-            wallpaperBitmap = null;
-            toast(getString(R.string.wallpaper_removed));
-            refreshWallpaperPage();
-        });
-        screenView.findViewById(R.id.wallpaper_preview_card).setClipToOutline(true);
-        final WallpaperSettings settings = new WallpaperSettings(this);
-        SeekBar seek = screenView.findViewById(R.id.wallpaper_dim_seek);
-        seek.setMax(WallpaperSettings.MAX_DIM_PERCENT);
-        seek.setProgress(settings.dimPercent());
-        seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
-                if (fromUser) settings.setDimPercent(progress);
-                showWallpaperDim(progress);
-            }
-            @Override public void onStartTrackingTouch(SeekBar bar) { }
-            @Override public void onStopTrackingTouch(SeekBar bar) { }
-        });
-        refreshWallpaperPage();
-    }
-
-    private void showWallpaperDim(int percent) {
-        ((TextView) screenView.findViewById(R.id.wallpaper_dim_label)).setText(getString(R.string.wallpaper_dim, percent));
-        screenView.findViewById(R.id.wallpaper_preview_shade).setBackgroundColor(WallpaperSettings.dimColor(percent));
-    }
-
-    /** Brings the wallpaper page in line with what is stored: preview, darkness slider and the Remove button. */
-    private void refreshWallpaperPage() {
-        if (screen != Screen.WALLPAPER) return;
-        WallpaperSettings settings = new WallpaperSettings(this);
-        boolean set = settings.isSet();
-        screenView.findViewById(R.id.wallpaper_preview_image).setVisibility(set ? View.VISIBLE : View.GONE);
-        screenView.findViewById(R.id.wallpaper_preview_shade).setVisibility(set ? View.VISIBLE : View.GONE);
-        screenView.findViewById(R.id.wallpaper_preview_empty).setVisibility(set ? View.GONE : View.VISIBLE);
-        screenView.findViewById(R.id.wallpaper_dim_seek).setEnabled(set);
-        View remove = screenView.findViewById(R.id.wallpaper_remove);
-        remove.setEnabled(set);
-        remove.setAlpha(set ? 1f : 0.4f);
-        showWallpaperDim(settings.dimPercent());
-        if (!set) return;
-        withWallpaper(bitmap -> {
-            if (screen != Screen.WALLPAPER) return;
-            ((ImageView) screenView.findViewById(R.id.wallpaper_preview_image)).setImageBitmap(bitmap);
-        });
-    }
-
-    private void importWallpaper(Uri uri) {
-        io.execute(() -> {
-            boolean ok;
-            try { new WallpaperSettings(this).importFrom(getContentResolver(), uri); ok = true; }
-            catch (Exception | OutOfMemoryError e) { ok = false; }
-            final boolean saved = ok;
-            runOnUiThread(() -> {
-                if (!saved) { toast(getString(R.string.wallpaper_failed)); return; }
-                wallpaperBitmap = null;
-                toast(getString(R.string.wallpaper_saved));
-                refreshWallpaperPage();
-            });
-        });
-    }
-
-    /** Hands over the decoded wallpaper on the UI thread: from the cache when it is current, otherwise after decoding it in the background. */
-    private void withWallpaper(Consumer<Bitmap> ready) {
-        final WallpaperSettings settings = new WallpaperSettings(this);
-        final long stamp = settings.stamp();
-        if (wallpaperBitmap != null && wallpaperStamp == stamp) { ready.accept(wallpaperBitmap); return; }
-        io.execute(() -> {
-            Bitmap bitmap = settings.load();
-            runOnUiThread(() -> {
-                if (bitmap == null) return;
-                wallpaperBitmap = bitmap;
-                wallpaperStamp = stamp;
-                ready.accept(bitmap);
-            });
-        });
-    }
-
-    /** Shows the user's wallpaper (with its darkness) behind the code area, or nothing when none is set. */
-    private void applyEditorWallpaper() {
-        ImageView image = screenView.findViewById(R.id.editor_wallpaper);
-        View shade = screenView.findViewById(R.id.editor_wallpaper_shade);
-        if (image == null || shade == null) return;
-        WallpaperSettings settings = new WallpaperSettings(this);
-        boolean set = settings.isSet();
-        image.setVisibility(set ? View.VISIBLE : View.GONE);
-        shade.setVisibility(set ? View.VISIBLE : View.GONE);
-        if (!set) { image.setImageDrawable(null); return; }
-        shade.setBackgroundColor(WallpaperSettings.dimColor(settings.dimPercent()));
-        withWallpaper(bitmap -> {
-            if (screen != Screen.EDITOR) return;
-            ImageView current = screenView.findViewById(R.id.editor_wallpaper);
-            if (current != null) current.setImageBitmap(bitmap);
-        });
+        click(R.id.settings_wallpaper, wallpaperUi::show);
     }
 
     /** Everything the project list needs from disk, read off the UI thread (shared storage can be very slow while a build is writing). */
     private static final class ProjectRow {
-        final File dir; final String applicationId; final String sdk; final long modified;
-        ProjectRow(File dir, String applicationId, String sdk, long modified) { this.dir = dir; this.applicationId = applicationId; this.sdk = sdk; this.modified = modified; }
+        final File dir; final String title; final String subtitle; final String sdk; final long modified;
+        ProjectRow(File dir, String title, String subtitle, String sdk, long modified) { this.dir = dir; this.title = title; this.subtitle = subtitle; this.sdk = sdk; this.modified = modified; }
     }
 
     private final ExecutorService projectsExecutor = Executors.newSingleThreadExecutor();
@@ -552,7 +424,7 @@ public class MainActivity extends AppCompatActivity {
      * the UI thread. Calls that arrive while a load is running are merged into one more load afterwards. (Doing this on the UI thread from
      * onResume froze the app for minutes while a build was using the disk.)
      */
-    private void refreshProjects() {
+    void refreshProjects() {
         if (screen != Screen.HOME) return;
         if (!projectsLoading.compareAndSet(false, true)) { projectsReloadQueued = true; return; }
         try {
@@ -561,7 +433,8 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     File[] dirs = projectsDir().listFiles(File::isDirectory);
                     if (dirs != null) for (File dir : dirs) {
-                        rows.add(new ProjectRow(dir, projectPackage(dir), LanguageUi.sdkRange(
+                        ProjectLabels.Line line = ProjectLabels.describe(dir);   // title + second line, see ProjectLabels
+                        rows.add(new ProjectRow(dir, line.getTitle(), line.getSubtitle(), LanguageUi.sdkRange(
                             BuildProjectFiles.readNumericSdkValue(dir, true, "?"), BuildProjectFiles.readNumericSdkValue(dir, false, "?")), dir.lastModified()));
                     }
                     Collections.sort(rows, (a, b) -> Long.compare(b.modified, a.modified));
@@ -587,17 +460,19 @@ public class MainActivity extends AppCompatActivity {
             View item = getLayoutInflater().inflate(R.layout.item_project, list, false);
             item.findViewById(R.id.project_avatar).setBackgroundResource(avatarBg[i % 3]);
             TextView initials = item.findViewById(R.id.project_initials);
-            initials.setText(initialsOf(project.getName()));
+            initials.setText(initialsOf(row.title));
             initials.setTextColor(color(avatarInk[i % 3]));
-            ((TextView) item.findViewById(R.id.project_name)).setText(project.getName());
-            ((TextView) item.findViewById(R.id.project_package)).setText(row.applicationId);
+            ((TextView) item.findViewById(R.id.project_name)).setText(row.title);
+            TextView second = item.findViewById(R.id.project_package);
+            second.setText(row.subtitle);
+            second.setVisibility(row.subtitle.isEmpty() ? View.GONE : View.VISIBLE);   // nothing to show: no empty line
             ((TextView) item.findViewById(R.id.project_sdk)).setText(row.sdk);
             ((TextView) item.findViewById(R.id.project_time)).setText(LanguageUi.timeAgo(row.modified));
             item.setOnClickListener(v -> openProject(project));
             item.findViewById(R.id.project_more).setOnClickListener(v -> showSheet(project.getName(), Arrays.asList(
-                new SheetAction(getString(R.string.keystore), R.drawable.ic_key, false, () -> showKeystore(project)),
-                new SheetAction(LanguageUi.EXPORT_AAB, R.drawable.ic_upload, false, () -> exportAabFlow(project)),
-                new SheetAction(LanguageUi.EXPORT_ZIP, R.drawable.ic_import_zip, false, () -> { exportZipProject = project; pickZipExport.launch(project.getName() + ".zip"); }),
+                new SheetAction(getString(R.string.keystore), R.drawable.ic_key, false, () -> keystoreUi.show(project)),
+                new SheetAction(LanguageUi.EXPORT_AAB, R.drawable.ic_upload, false, () -> aabUi.start(project)),
+                new SheetAction(LanguageUi.EXPORT_ZIP, R.drawable.ic_import_zip, false, () -> zipUi.exportZip(project)),
                 new SheetAction(getString(R.string.rename), R.drawable.ic_edit, false, () -> renameProject(project)),
                 new SheetAction(getString(R.string.delete), R.drawable.ic_delete, true, () -> confirmDelete(project, () -> { new ProjectKeys(getFilesDir()).clear(project.getName()); refreshProjects(); })))));
             list.addView(item);
@@ -611,10 +486,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String projectPackage(File project) {
-        String id = BuildProjectFiles.readApplicationId(project, null);
-        if (id == null) {
-            try { id = ManifestMerger.readPackage(BuildProjectFiles.manifest(project)); } catch (Exception ignored) { }
-        }
+        String id = ProjectLabels.packageName(project);   // the editor drawer still falls back to the project name
         return id == null ? project.getName() : id;
     }
 
@@ -698,7 +570,7 @@ public class MainActivity extends AppCompatActivity {
 
     // ------------------------------------------------------------------ import
 
-    private String displayName(Uri uri) {
+    String displayName(Uri uri) {
         try (Cursor cursor = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
             if (cursor != null && cursor.moveToFirst() && cursor.getString(0) != null) return cursor.getString(0);
         } catch (Exception ignored) { }
@@ -706,159 +578,23 @@ public class MainActivity extends AppCompatActivity {
         return last == null ? "project" : last;
     }
 
-    private File uniqueFile(File parent, String base) {
+    File uniqueFile(File parent, String base) {
         File candidate = new File(parent, base);
         for (int suffix = 2; candidate.exists(); suffix++) candidate = new File(parent, base + "-" + suffix);
         return candidate;
     }
 
-    private String safeName(String raw, String fallback) {
+    String safeName(String raw, String fallback) {
         String cleaned = raw.replaceAll("[\\\\/:*?\"<>|]", "_").trim();
         return validName(cleaned) ? cleaned : fallback;
     }
 
-    private void importZip(Uri zipUri) { importZip(zipUri, null, false); }
-
-    /** Asks for the ZIP password, then imports again. {@code wrong} shows that the previous password did not work. */
-    private void askZipPassword(Uri zipUri, boolean wrong) {
-        View view = getLayoutInflater().inflate(R.layout.dialog_input, null);
-        EditText input = view.findViewById(R.id.dialog_input);
-        input.setHint(LanguageUi.ZIP_PASSWORD_HINT);
-        input.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD);
-        input.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO);
-        new MaterialAlertDialogBuilder(this).setTitle(LanguageUi.ZIP_PASSWORD_TITLE)
-            .setMessage(wrong ? LanguageUi.ZIP_PASSWORD_WRONG : LanguageUi.ZIP_PASSWORD_MESSAGE)
-            .setView(view)
-            .setNegativeButton(R.string.cancel, null)
-            .setPositiveButton(LanguageUi.ZIP_PASSWORD_IMPORT, (d, w) -> {
-                char[] password = new char[input.length()];
-                input.getText().getChars(0, password.length, password, 0);   // the password is not trimmed and never stored as a String
-                importZip(zipUri, password, true);
-            }).show();
-    }
-
-    private void importZip(Uri zipUri, char[] password, boolean passwordGiven) {
-        String zipName = displayName(zipUri);
-        String base = zipName.toLowerCase(Locale.ROOT).endsWith(".zip") ? zipName.substring(0, zipName.length() - 4) : zipName;
-        final String projectName = safeName(base, "project");
-        if (!passwordGiven) toast(LanguageUi.IMPORTING);
-        io.execute(() -> {
-            File dest = uniqueFile(projectsDir(), projectName);
-            try {
-                if (!dest.mkdirs()) throw new IOException("Could not create " + dest.getName());
-                ProjectZipImporter.importZip(
-                    () -> { InputStream in = getContentResolver().openInputStream(zipUri); if (in == null) throw new IOException("Could not open the ZIP."); return in; },
-                    new ProjectZipImporter.Sink() {
-                        @Override public void ensureDirectory(String relativePath) throws IOException {
-                            File dir = new File(dest, relativePath);
-                            if (!dir.isDirectory() && !dir.mkdirs()) throw new IOException("Could not create folder: " + relativePath);
-                        }
-                        @Override public OutputStream openFile(String relativePath) throws IOException {
-                            File file = new File(dest, relativePath);
-                            File parent = file.getParentFile();
-                            if (parent != null && !parent.isDirectory() && !parent.mkdirs()) throw new IOException("Could not create folder for: " + relativePath);
-                            return new FileOutputStream(file);
-                        }
-                    },
-                    (written, total) -> { }, password);
-                runOnUiThread(() -> { toast(LanguageUi.PROJECT_IMPORTED); refreshProjects(); });
-            } catch (ProjectZipImporter.PasswordRequiredException | ProjectZipImporter.WrongPasswordException passwordProblem) {
-                deleteRecursively(dest);
-                boolean wrong = passwordProblem instanceof ProjectZipImporter.WrongPasswordException;
-                runOnUiThread(() -> askZipPassword(zipUri, wrong));
-            } catch (Exception e) {
-                deleteRecursively(dest);
-                runOnUiThread(() -> toast(LanguageUi.IMPORT_FAILED + e.getMessage()));
-            } finally {
-                if (password != null) java.util.Arrays.fill(password, '\0');
-            }
-        });
-    }
-
-    /** Writes the project into the ZIP file the user picked. Build output and IDE caches are left out; a half-written file is removed on failure. */
-    private void exportProjectZip(File project, Uri target) {
-        toast(LanguageUi.EXPORTING_ZIP);
-        io.execute(() -> {
-            try {
-                try (OutputStream raw = getContentResolver().openOutputStream(target, "w")) {
-                    if (raw == null) throw new IOException("Could not open the file you chose.");
-                    try (java.util.zip.ZipOutputStream zip = new java.util.zip.ZipOutputStream(new java.io.BufferedOutputStream(raw))) {
-                        addToZip(zip, project, "");
-                    }
-                }
-                runOnUiThread(() -> toast(LanguageUi.ZIP_EXPORTED));
-            } catch (Exception e) {
-                try { android.provider.DocumentsContract.deleteDocument(getContentResolver(), target); } catch (Exception ignored) { }
-                runOnUiThread(() -> toast(LanguageUi.ZIP_EXPORT_FAILED + e.getMessage()));
-            }
-        });
-    }
-
-    private void addToZip(java.util.zip.ZipOutputStream zip, File directory, String prefix) throws IOException {
-        File[] children = directory.listFiles();
-        if (children == null) return;
-        Arrays.sort(children);
-        for (File child : children) {
-            String name = child.getName();
-            if (skipWhenCopying(name) && !name.equals("outputs") || name.equals(".git")) continue;   // build output, caches and git history stay out of the ZIP
-            if (java.nio.file.Files.isSymbolicLink(child.toPath())) continue;
-            String path = prefix + name;
-            if (child.isDirectory()) {
-                zip.putNextEntry(new java.util.zip.ZipEntry(path + "/")); zip.closeEntry();
-                addToZip(zip, child, path + "/");
-            } else if (child.isFile()) {
-                zip.putNextEntry(new java.util.zip.ZipEntry(path));
-                try (InputStream in = new FileInputStream(child)) { copyStream(in, zip); }
-                zip.closeEntry();
-            }
-        }
-    }
-
-    private void importFolder(Uri treeUri) {
-        DocumentFile tree = DocumentFile.fromTreeUri(this, treeUri);
-        if (tree == null || !tree.isDirectory()) { toast(LanguageUi.IMPORT_FAILED + "folder not available"); return; }
-        final String projectName = safeName(tree.getName() == null ? "project" : tree.getName(), "project");
-        toast(LanguageUi.IMPORTING);
-        io.execute(() -> {
-            File dest = uniqueFile(projectsDir(), projectName);
-            try {
-                copyDocumentTree(tree, dest);
-                runOnUiThread(() -> { toast(LanguageUi.PROJECT_IMPORTED); refreshProjects(); });
-            } catch (Exception e) {
-                deleteRecursively(dest);
-                runOnUiThread(() -> toast(LanguageUi.IMPORT_FAILED + e.getMessage()));
-            }
-        });
-    }
-
-    private boolean skipWhenCopying(String name) {
-        return name.equals(".git") || name.equals(".gradle") || name.equals("build") || name.equals("outputs") || name.equals(".idea");
-    }
-
-    private void copyDocumentTree(DocumentFile source, File destination) throws IOException {
-        if (source.isDirectory()) {
-            if (!destination.exists() && !destination.mkdirs()) throw new IOException("Could not create directory: " + destination.getName());
-            for (DocumentFile child : source.listFiles()) {
-                String childName = child.getName();
-                if (childName == null || skipWhenCopying(childName)) continue;
-                File target = new File(destination, childName);
-                if (!target.getCanonicalPath().startsWith(destination.getCanonicalPath() + File.separator)) throw new IOException("Unsafe file name in folder.");
-                copyDocumentTree(child, target);
-            }
-            return;
-        }
-        try (InputStream input = getContentResolver().openInputStream(source.getUri()); OutputStream output = new FileOutputStream(destination)) {
-            if (input == null) throw new IOException("Could not read " + source.getName());
-            copyStream(input, output);
-        }
-    }
-
-    private void copyStream(InputStream input, OutputStream output) throws IOException {
+    void copyStream(InputStream input, OutputStream output) throws IOException {
         byte[] buffer = new byte[32768]; int count;
         while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
     }
 
-    private void deleteRecursively(File file) {
+    void deleteRecursively(File file) {
         if (file == null || !file.exists()) return;
         if (file.isDirectory()) { File[] children = file.listFiles(); if (children != null) for (File child : children) deleteRecursively(child); }
         file.delete();
@@ -1042,7 +778,7 @@ public class MainActivity extends AppCompatActivity {
         ((TextView) screenView.findViewById(R.id.drawer_initials)).setText(initialsOf(currentProject.getName()));
         codeEditor = screenView.findViewById(R.id.code_editor);
         codeGutter = screenView.findViewById(R.id.code_gutter);
-        applyEditorWallpaper();
+        wallpaperUi.applyToEditor();
         DrawerLayout drawer = screenView.findViewById(R.id.editor_drawer);
         click(R.id.editor_menu, () -> drawer.openDrawer(GravityCompat.START));
         click(R.id.editor_open_structure, () -> drawer.openDrawer(GravityCompat.START));
@@ -1457,198 +1193,17 @@ public class MainActivity extends AppCompatActivity {
         row.setOnClickListener(v -> openFile(file));
         row.findViewById(R.id.node_more).setOnClickListener(v -> {
             List<SheetAction> actions = new ArrayList<>();
-            if (file.getName().toLowerCase(Locale.ROOT).endsWith(".py")) actions.add(new SheetAction("Run with Python", R.drawable.ic_play, false, () -> runPythonFile(file)));
+            if (file.getName().toLowerCase(Locale.ROOT).endsWith(".py")) actions.add(new SheetAction("Run with Python", R.drawable.ic_play, false, () -> runUi.runPython(file)));
             String lowerName = file.getName().toLowerCase(Locale.ROOT);
-            if (lowerName.endsWith(".js") || lowerName.endsWith(".mjs")) actions.add(new SheetAction("Run with JavaScript", R.drawable.ic_play, false, () -> runJavaScriptFile(file)));
-            if (lowerName.endsWith(".dart")) actions.add(new SheetAction("Run with Dart", R.drawable.ic_play, false, () -> runDartFile(file)));
-            if (lowerName.endsWith(".java")) actions.add(new SheetAction("Run with Java", R.drawable.ic_play, false, () -> runJavaFile(file)));
-            if (lowerName.endsWith(".kt")) actions.add(new SheetAction("Run with Kotlin", R.drawable.ic_play, false, () -> runJavaFile(file)));
+            if (lowerName.endsWith(".js") || lowerName.endsWith(".mjs")) actions.add(new SheetAction("Run with JavaScript", R.drawable.ic_play, false, () -> runUi.runJavaScript(file)));
+            if (lowerName.endsWith(".dart")) actions.add(new SheetAction("Run with Dart", R.drawable.ic_play, false, () -> runUi.runDart(file)));
+            if (lowerName.endsWith(".java")) actions.add(new SheetAction("Run with Java", R.drawable.ic_play, false, () -> runUi.runJava(file)));
+            if (lowerName.endsWith(".kt")) actions.add(new SheetAction("Run with Kotlin", R.drawable.ic_play, false, () -> runUi.runJava(file)));
             actions.add(new SheetAction(getString(R.string.rename), R.drawable.ic_edit, false, () -> renameItem(file)));
             actions.add(new SheetAction(getString(R.string.delete), R.drawable.ic_delete, true, () -> deleteItem(file)));
             showSheet(file.getName(), actions);
         });
         tree.addView(row);
-    }
-
-    // ---------------------------------------------------------------- Python
-
-    private final ExecutorService pythonExecutor = Executors.newSingleThreadExecutor();
-
-    /** A scrolling output dialog with a Stop button; the logger may be called from any thread. */
-    private final class RunConsole {
-        final com.example.studiomobile.build.BuildLogger logger;
-        RunConsole(String title, Runnable onStop) {
-            TextView output = new TextView(MainActivity.this);
-            output.setTypeface(android.graphics.Typeface.MONOSPACE); output.setTextSize(12); output.setTextIsSelectable(true);
-            output.setPadding(dp(16), dp(8), dp(16), dp(8)); output.setTextColor(color(R.color.cosmic_ink));
-            ScrollView scroll = new ScrollView(MainActivity.this); scroll.addView(output);
-            AlertDialog dialog = new MaterialAlertDialogBuilder(MainActivity.this).setTitle(title).setView(scroll)
-                .setPositiveButton(LanguageUi.CLOSE, null).setNegativeButton("Stop", null).create();
-            dialog.show();
-            dialog.getButton(AlertDialog.BUTTON_NEGATIVE).setOnClickListener(v -> onStop.run());
-            logger = new com.example.studiomobile.build.BuildLogger() {
-                private void add(String text) { runOnUiThread(() -> { if (output.length() < 200000) output.append(text + "\n"); scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN)); }); }
-                @Override public void onInfo(String message) { add(message); }
-                @Override public void onWarning(String message) { add("warning: " + message); }
-                @Override public void onError(String message, Throwable cause) { add(message); }
-            };
-        }
-    }
-
-    /** One Run at a time: the first keeps the gate, a second request is cancelled on the spot (the runners share compile folders). */
-    private final com.example.studiomobile.RunGate runGate = new com.example.studiomobile.RunGate();
-
-    private com.example.studiomobile.RunGate.Ticket beginRun() {
-        com.example.studiomobile.RunGate.Ticket ticket = runGate.tryAcquire();
-        if (ticket == null) toast("Another Run is still active, so this one was cancelled. Press Stop on the first one to run again.");
-        return ticket;
-    }
-
-    /** Opens the output window; if that fails the gate is freed again, otherwise Run would stay locked. */
-    private RunConsole openConsole(com.example.studiomobile.RunGate.Ticket ticket, String title, Runnable onStop) {
-        try { return new RunConsole(title, onStop); }
-        catch (RuntimeException error) { ticket.release(); throw error; }
-    }
-
-    /** Runs a .js file with the bundled Node.js binary (libnodeexe.so) and shows its output live. */
-    private void runJavaScriptFile(File file) {
-        if (dirty && file.equals(openedFile)) { toast("Save the file before running it"); return; }
-        com.example.studiomobile.RunGate.Ticket ticket = beginRun();
-        if (ticket == null) return;
-        com.example.studiomobile.script.JavaScriptRunner runner = new com.example.studiomobile.script.JavaScriptRunner(
-                new File(getApplicationInfo().nativeLibraryDir), new File(getFilesDir(), "node-home"), getCacheDir());
-        RunConsole console = openConsole(ticket, file.getName(), runner::cancel);
-        com.example.studiomobile.build.BuildLogger logger = console.logger;
-        pythonExecutor.execute(() -> {
-            try {
-                logger.onInfo("$ node " + file.getName());
-                int code = runner.run(file, 120, logger);
-                logger.onInfo(code == -1 ? "\n[timed out or stopped]" : "\n[process finished with exit code " + code + "]");
-            } catch (Exception error) {
-                logger.onError("Could not run JavaScript: " + error.getMessage(), error);
-            } finally {
-                ticket.release();
-            }
-        });
-    }
-
-    /** Runs a .dart file: compiled to kernel by the Dart front end, then executed on the Dart VM (64-bit devices only). */
-    private void runDartFile(File file) {
-        if (dirty && file.equals(openedFile)) { toast("Save the file before running it"); return; }
-        com.example.studiomobile.RunGate.Ticket ticket = beginRun();
-        if (ticket == null) return;
-        java.util.concurrent.atomic.AtomicReference<com.example.studiomobile.dart.DartScriptRunner> running = new java.util.concurrent.atomic.AtomicReference<>();
-        java.util.concurrent.atomic.AtomicReference<com.example.studiomobile.dart.DartProvisioner> installing = new java.util.concurrent.atomic.AtomicReference<>();
-        RunConsole console = openConsole(ticket, file.getName(), () -> {
-            com.example.studiomobile.dart.DartScriptRunner runner = running.get(); if (runner != null) runner.cancel();
-            com.example.studiomobile.dart.DartProvisioner provisioner = installing.get(); if (provisioner != null) provisioner.cancel();
-        });
-        com.example.studiomobile.build.BuildLogger logger = console.logger;
-        pythonExecutor.execute(() -> {
-            try {
-                String unsupported = com.example.studiomobile.build.DeviceAbi.require64Bit("Dart", com.example.studiomobile.build.DeviceAbi.supportedAbis());
-                if (unsupported != null) { logger.onError(unsupported, null); return; }
-                File filesDirectory = getFilesDir(), nativeDirectory = new File(getApplicationInfo().nativeLibraryDir);
-                if (!com.example.studiomobile.dart.DartRuntime.isBundled(nativeDirectory)) {
-                    logger.onError("This build of Studio Mobile does not contain the Dart runtime. Run the workflow once with build_dart, then build the APK again.", null);
-                    return;
-                }
-                if (!com.example.studiomobile.dart.DartRuntime.isSdkInstalled(new File(filesDirectory, "dart-sdk"))) {
-                    com.example.studiomobile.build.dependency.BuildToolCatalog catalog;
-                    try (InputStream in = getAssets().open("build-tools/catalog.json")) {
-                        catalog = com.example.studiomobile.build.dependency.BuildToolCatalog.readVerified(in, com.example.studiomobile.build.dependency.BuildToolCatalog.BUNDLED_CATALOG_SHA256);
-                    }
-                    com.example.studiomobile.dart.DartProvisioner provisioner = new com.example.studiomobile.dart.DartProvisioner(filesDirectory, catalog, Arrays.asList(android.os.Build.SUPPORTED_ABIS));
-                    installing.set(provisioner);
-                    if (provisioner.install(logger) == null) return;
-                }
-                List<String> problems = new ArrayList<>();
-                com.example.studiomobile.dart.DartRuntime runtime = com.example.studiomobile.dart.DartRuntime.locate(filesDirectory, nativeDirectory, problems);
-                if (runtime == null) { for (String problem : problems) logger.onError(problem, null); return; }
-                com.example.studiomobile.dart.DartScriptRunner runner = new com.example.studiomobile.dart.DartScriptRunner(runtime, new File(filesDirectory, "dart-home"), getCacheDir());
-                running.set(runner);
-                logger.onInfo("$ dart " + file.getName());
-                int code = runner.run(file, 180, logger);
-                logger.onInfo(code == -1 ? "\n[timed out or stopped]" : "\n[process finished with exit code " + code + "]");
-            } catch (Exception error) {
-                logger.onError("Could not run Dart: " + error, error);
-            } finally {
-                ticket.release();
-            }
-        });
-    }
-
-    /** Runs a .py file with the bundled CPython and shows its output live. The standard library is downloaded once on first use. */
-    private void runPythonFile(File file) {
-        if (dirty && file.equals(openedFile)) { toast("Save the file before running it"); return; }
-        com.example.studiomobile.RunGate.Ticket ticket = beginRun();
-        if (ticket == null) return;
-        java.util.concurrent.atomic.AtomicReference<com.example.studiomobile.python.PythonScriptRunner> running = new java.util.concurrent.atomic.AtomicReference<>();
-        java.util.concurrent.atomic.AtomicReference<com.example.studiomobile.python.PythonProvisioner> installing = new java.util.concurrent.atomic.AtomicReference<>();
-        RunConsole console = openConsole(ticket, file.getName(), () -> {
-            com.example.studiomobile.python.PythonScriptRunner runner = running.get(); if (runner != null) runner.cancel();
-            com.example.studiomobile.python.PythonProvisioner provisioner = installing.get(); if (provisioner != null) provisioner.cancel();
-        });
-        com.example.studiomobile.build.BuildLogger logger = console.logger;
-        pythonExecutor.execute(() -> {
-            try {
-                File filesDirectory = getFilesDir(), nativeDirectory = new File(getApplicationInfo().nativeLibraryDir);
-                String unsupported = com.example.studiomobile.build.DeviceAbi.require64Bit("Python", com.example.studiomobile.build.DeviceAbi.supportedAbis());
-                if (unsupported != null) { logger.onError(unsupported, null); return; }
-                if (!com.example.studiomobile.python.PythonRuntime.isInterpreterBundled(nativeDirectory)) {
-                    logger.onError("This build of Studio Mobile does not contain the Python interpreter (libpythonexe.so). Build the app with the Python step of .github/workflows/build.yml.", null);
-                    return;
-                }
-                if (com.example.studiomobile.python.PythonRuntime.findStandardLibrary(new File(filesDirectory, "python")) == null) {
-                    com.example.studiomobile.build.dependency.BuildToolCatalog catalog;
-                    try (InputStream in = getAssets().open("build-tools/catalog.json")) {
-                        catalog = com.example.studiomobile.build.dependency.BuildToolCatalog.readVerified(in, com.example.studiomobile.build.dependency.BuildToolCatalog.BUNDLED_CATALOG_SHA256);
-                    }
-                    com.example.studiomobile.python.PythonProvisioner provisioner = new com.example.studiomobile.python.PythonProvisioner(filesDirectory, catalog, Arrays.asList(android.os.Build.SUPPORTED_ABIS));
-                    installing.set(provisioner);
-                    if (provisioner.install(logger) == null) return;
-                }
-                List<String> problems = new ArrayList<>();
-                com.example.studiomobile.python.PythonRuntime runtime = com.example.studiomobile.python.PythonRuntime.locate(filesDirectory, nativeDirectory, problems);
-                if (runtime == null) { for (String problem : problems) logger.onError(problem, null); return; }
-                com.example.studiomobile.python.PythonScriptRunner runner = new com.example.studiomobile.python.PythonScriptRunner(runtime, new File(filesDirectory, "python-home"), getCacheDir());
-                running.set(runner);
-                logger.onInfo("$ python " + file.getName());
-                int code = runner.run(file, 120, logger);
-                logger.onInfo(code == -1 ? "\n[timed out after 120 s]" : "\n[process finished with exit code " + code + "]");
-            } catch (Exception error) {
-                logger.onError("Could not run Python: " + error, error);
-            } finally {
-                ticket.release();
-            }
-        });
-    }
-
-    private final ExecutorService javaExecutor = Executors.newSingleThreadExecutor();
-
-    /** Compiles a .java or .kt file (in-process ECJ or Kotlin compiler, then D8) and runs its main() in a separate process, showing the output live. */
-    private void runJavaFile(File file) {
-        if (dirty && file.equals(openedFile)) { toast("Save the file before running it"); return; }
-        final long timeoutSeconds = 120;
-        com.example.studiomobile.RunGate.Ticket ticket = beginRun();
-        if (ticket == null) return;
-        java.util.concurrent.atomic.AtomicReference<com.example.studiomobile.javarun.JavaFileRunner> running = new java.util.concurrent.atomic.AtomicReference<>();
-        RunConsole console = openConsole(ticket, file.getName(), () -> {
-            com.example.studiomobile.javarun.JavaFileRunner runner = running.get(); if (runner != null) runner.cancel();
-        });
-        com.example.studiomobile.build.BuildLogger logger = console.logger;
-        javaExecutor.execute(() -> {
-            try {
-                com.example.studiomobile.javarun.JavaFileRunner runner = new com.example.studiomobile.javarun.JavaFileRunner(getApplicationContext(), toolsDir());
-                running.set(runner);
-                int code = runner.run(file, currentProject, timeoutSeconds, logger);
-                logger.onInfo(com.example.studiomobile.javarun.JavaFileRunner.describe(code, timeoutSeconds));
-            } catch (Exception error) {
-                logger.onError("Could not run: " + error.getMessage(), error);
-            } finally {
-                ticket.release();
-            }
-        });
     }
 
     private void expandAncestors(File from) {
@@ -1900,7 +1455,7 @@ public class MainActivity extends AppCompatActivity {
     // ------------------------------------------------------------------ build
 
     /** The build page is only a fullscreen log. Pressing Build in the editor opens it and starts the build immediately. */
-    private void showBuild(boolean start) {
+    void showBuild(boolean start) {
         if (currentProject == null) { showHome(); return; }
         show(Screen.BUILD, R.layout.screen_build, false, R.color.log_bg);
         ((TextView) screenView.findViewById(R.id.build_project_name)).setText(currentProject.getName());
@@ -2165,411 +1720,8 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private void showToolchainStatus() {
-        io.execute(() -> {
-            com.example.studiomobile.build.LocalLibsInstaller.install(this);
-            List<String> missing = new com.example.studiomobile.build.BuildToolchainInspector(this).inspect();
-            String shown = missing.isEmpty() ? LanguageUi.TOOLCHAIN_OK : LanguageUi.TOOLCHAIN_MISSING + android.text.TextUtils.join("\n\n- ", missing);
-            runOnUiThread(() -> new MaterialAlertDialogBuilder(this).setTitle(LanguageUi.TOOLCHAIN_TITLE).setMessage(shown).setPositiveButton(R.string.ok, null).show());
-        });
-    }
-
-    // ------------------------------------------------------------------ MCP
-
-    private McpToolRegistry newMcpRegistry(McpSettings settings) {
-        return new McpToolRegistry(new ProjectFileOperations(projectsDir()), settings, buildService, toolsDir(), null, new DebugModeSettings(this));
-    }
-
-    private String appVersionName() {
-        try { return getPackageManager().getPackageInfo(getPackageName(), 0).versionName; }
-        catch (Exception ignored) { return "0.1.0"; }
-    }
-
-    private void showMcp() {
-        show(Screen.MCP, R.layout.screen_mcp, true, R.color.cosmic_white);
-        final McpSettings settings = new McpSettings(this);
-        click(R.id.mcp_back, this::goBack);
-
-        com.google.android.material.switchmaterial.SwitchMaterial readOnlySwitch = screenView.findViewById(R.id.mcp_read_only_switch);
-        readOnlySwitch.setChecked(settings.isReadOnly());
-        readOnlySwitch.setOnCheckedChangeListener((button, checked) -> settings.setReadOnly(checked));
-
-        // The relay URL belongs to the user: typed here, stored on this phone, never built into the app.
-        EditText urlInput = screenView.findViewById(R.id.mcp_relay_url);
-        urlInput.setText(settings.getRelayUrl());
-        urlInput.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
-            @Override public void onTextChanged(CharSequence text, int start, int before, int count) { }
-            @Override public void afterTextChanged(Editable text) { settings.setRelayUrl(text.toString()); renderMcpEndpoint(); }
-        });
-        EditText tokenInput = screenView.findViewById(R.id.mcp_relay_token);
-        tokenInput.setText(settings.getRelayToken());
-        tokenInput.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) { }
-            @Override public void onTextChanged(CharSequence text, int start, int before, int count) { }
-            @Override public void afterTextChanged(Editable text) { settings.setRelayToken(text.toString()); }
-        });
-        click(R.id.mcp_relay_toggle, () -> toggleMcpRelay(settings, urlInput));
-        click(R.id.mcp_endpoint_copy, () -> {
-            String endpoint = mcpEndpoint();
-            if (endpoint == null) return;
-            ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-            clipboard.setPrimaryClip(ClipData.newPlainText(getString(R.string.mcp_endpoint_title), endpoint));
-            toast(getString(R.string.mcp_endpoint_copied));
-        });
-
-        for (String guide : new String[]{"claude", "chatgpt", "gemini", "code"}) {
-            final View body = screenView.findViewById(getResources().getIdentifier("mcp_guide_" + guide + "_body", "id", getPackageName()));
-            final View chevron = screenView.findViewById(getResources().getIdentifier("mcp_guide_" + guide + "_chevron", "id", getPackageName()));
-            screenView.findViewById(getResources().getIdentifier("mcp_guide_" + guide + "_header", "id", getPackageName())).setOnClickListener(v -> {
-                boolean open = body.getVisibility() != View.VISIBLE;
-                body.setVisibility(open ? View.VISIBLE : View.GONE);
-                chevron.setRotation(open ? 180f : 0f);
-            });
-        }
-
-        click(R.id.mcp_self_test, this::runMcpSelfTest);
-        click(R.id.mcp_toolchain_status, this::showToolchainStatus);
-        renderMcpEndpoint();
-        renderMcpRelay();
-    }
-
-    /** The relay address the user typed, normalized, or null when it is empty or not usable. */
-    private String mcpRelayBase() {
-        if (screenView == null) return null;
-        EditText input = screenView.findViewById(R.id.mcp_relay_url);
-        return input == null ? null : McpRelayUrl.normalize(input.getText().toString());
-    }
-
-    /** The address to paste into Claude, ChatGPT or Gemini, or null until a valid relay URL is entered. */
-    private String mcpEndpoint() {
-        String base = mcpRelayBase();
-        return base == null ? null : McpRelayUrl.aiEndpoint(base);
-    }
-
-    private void toggleMcpRelay(McpSettings settings, EditText urlInput) {
-        if (McpRelayService.isRunning()) { McpRelayService.stop(this); return; }
-        String base = McpRelayUrl.normalize(urlInput.getText().toString());
-        if (base == null) { toast(getString(R.string.mcp_relay_url_invalid)); return; }
-        settings.setRelayUrl(base);
-        if (!base.equals(urlInput.getText().toString())) urlInput.setText(base);
-        // The foreground notification is hidden without this permission on Android 13+, but the connection still works.
-        if (android.os.Build.VERSION.SDK_INT >= 33
-            && ContextCompat.checkSelfPermission(this, android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
-            notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS);
-        }
-        McpRelayService.start(this);
-    }
-
-    /** Shows the address for the AI and fills the three guides with it. */
-    private void renderMcpEndpoint() {
-        if (screen != Screen.MCP || screenView == null) return;
-        String endpoint = mcpEndpoint();
-        TextView text = screenView.findViewById(R.id.mcp_endpoint_text);
-        text.setText(endpoint == null ? getString(R.string.mcp_endpoint_empty) : endpoint);
-        text.setTextColor(color(endpoint == null ? R.color.cosmic_muted : R.color.cosmic_ink));
-        screenView.findViewById(R.id.mcp_endpoint_actions).setVisibility(endpoint == null ? View.GONE : View.VISIBLE);
-        String shown = endpoint == null ? getString(R.string.mcp_endpoint_placeholder) : endpoint;
-        ((TextView) screenView.findViewById(R.id.mcp_guide_claude_body)).setText(getString(R.string.mcp_guide_claude_body, shown));
-        ((TextView) screenView.findViewById(R.id.mcp_guide_chatgpt_body)).setText(getString(R.string.mcp_guide_chatgpt_body, shown));
-        ((TextView) screenView.findViewById(R.id.mcp_guide_gemini_body)).setText(getString(R.string.mcp_guide_gemini_body, shown));
-        ((TextView) screenView.findViewById(R.id.mcp_guide_code_body)).setText(getString(R.string.mcp_guide_code_body, shown));
-    }
-
-    /** Shows the live connection state, taken from the foreground service. */
-    private void renderMcpRelay() {
-        if (screen != Screen.MCP || screenView == null) return;
-        boolean running = McpRelayService.isRunning();
-        McpRelayClient.State state = McpRelayService.getState();
-        String detail = McpRelayService.getDetail();
-        int label; int tint;
-        switch (state) {
-            case CONNECTING: label = R.string.mcp_status_connecting; tint = R.color.cosmic_primary_dark; break;
-            case CONNECTED: label = R.string.mcp_status_connected; tint = R.color.cosmic_mint_ink; break;
-            case RECONNECTING: label = R.string.mcp_status_reconnecting; tint = R.color.cosmic_peach_ink; break;
-            case FAILED: label = R.string.mcp_status_failed; tint = R.color.cosmic_danger; break;
-            default: label = R.string.mcp_connection_none; tint = R.color.cosmic_muted; break;
-        }
-        TextView value = screenView.findViewById(R.id.mcp_connection_value);
-        value.setText(label);
-        value.setTextColor(color(tint));
-        TextView detailView = screenView.findViewById(R.id.mcp_status_detail);
-        detailView.setText(detail);
-        detailView.setVisibility(detail.isEmpty() ? View.GONE : View.VISIBLE);
-        ((TextView) screenView.findViewById(R.id.mcp_relay_toggle)).setText(running ? R.string.mcp_disconnect : R.string.mcp_connect);
-        screenView.findViewById(R.id.mcp_relay_url).setEnabled(!running);
-        screenView.findViewById(R.id.mcp_relay_token).setEnabled(!running);
-    }
-
-    /** Sends three real MCP messages through the handler so the user can confirm it works on this device. */
-    private void runMcpSelfTest() {
-        McpSettings settings = new McpSettings(this);
-        McpRequestHandler handler = new McpRequestHandler(newMcpRegistry(settings), settings, appVersionName());
-        StringBuilder report = new StringBuilder();
-        report.append(mcpSelfTestStep(handler, "initialize", "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"initialize\",\"params\":{\"protocolVersion\":\"2025-06-18\"}}")).append('\n');
-        report.append(mcpSelfTestStep(handler, "tools/list", "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/list\"}")).append('\n');
-        report.append(mcpSelfTestStep(handler, "list_projects", "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"list_projects\",\"arguments\":{}}}"));
-        new MaterialAlertDialogBuilder(this).setTitle(R.string.mcp_self_test_title).setMessage(report.toString()).setPositiveButton(R.string.ok, null).show();
-    }
-
-    private String mcpSelfTestStep(McpRequestHandler handler, String label, String request) {
-        try {
-            String response = handler.handle(request);
-            if (response == null) return label + ": no response";
-            org.json.JSONObject json = new org.json.JSONObject(response);
-            if (json.has("error")) return label + ": FAILED - " + json.getJSONObject("error").optString("message");
-            org.json.JSONObject result = json.getJSONObject("result");
-            if (result.has("tools")) return label + ": OK, " + result.getJSONArray("tools").length() + " tools";
-            if (result.has("protocolVersion")) return label + ": OK, protocol " + result.getString("protocolVersion");
-            if (result.optBoolean("isError", false)) return label + ": tool returned an error";
-            return label + ": OK";
-        } catch (Exception e) {
-            return label + ": FAILED - " + e.getMessage();
-        }
-    }
-
     // ------------------------------------------------------------------ keystore (one key per project)
 
-    private File toolsDir() { return new File(getFilesDir(), "build-tools"); }
-    private ProjectKeys keys() { return new ProjectKeys(getFilesDir()); }
-    private File debugKeyFile() { return new File(toolsDir(), ApkSigningStage.DEBUG_KEYSTORE_FILE); }
-
-    /** Key dialogs show secrets too, so their windows are protected from screenshots and screen recording as well. */
-    private void secureDialog(android.app.Dialog dialog) {
-        if (dialog.getWindow() != null) dialog.getWindow().addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE);
-    }
-
-    private void ensureDefaultKey(Runnable afterReady) {
-        io.execute(() -> {
-            try {
-                ApkSigningStage.ensureDebugKeyStore(toolsDir(), null);
-                if (afterReady != null) runOnUiThread(afterReady);
-            } catch (Exception e) {
-                runOnUiThread(() -> toast(LanguageUi.KEY_DEFAULT_FAILED + e.getMessage()));
-            }
-        });
-    }
-
-    private interface CredentialsHandler { void accept(String alias, String storePassword, String keyPassword); }
-
-    /** Asks for alias and password. Alias and store password are required; the key password is optional. */
-    private void credentialsDialog(String title, String message, String aliasPrefill, String positive, CredentialsHandler handler) {
-        View view = getLayoutInflater().inflate(R.layout.dialog_keystore_import, null);
-        EditText alias = view.findViewById(R.id.import_alias), storePassword = view.findViewById(R.id.import_store_password), keyPassword = view.findViewById(R.id.import_key_password);
-        alias.setText(aliasPrefill);
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this).setTitle(title).setMessage(message).setView(view)
-            .setNegativeButton(R.string.cancel, null).setPositiveButton(positive, null).create();
-        secureDialog(dialog);
-        dialog.setOnShowListener(d -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
-            String a = alias.getText().toString().trim(), sp = storePassword.getText().toString(), kp = keyPassword.getText().toString();
-            if (a.isEmpty()) { alias.setError(LanguageUi.ALIAS_REQUIRED); return; }
-            if (sp.isEmpty()) { storePassword.setError(LanguageUi.PASSWORD_REQUIRED); return; }
-            dialog.dismiss();
-            handler.accept(a, sp, kp);
-        }));
-        dialog.show();
-    }
-
-    // ---- the Keystore page of one project: the key it is signed with, plus Copy, Import, Export and Change
-
-    private void showKeystore(File project) {
-        keyProject = project;
-        shownKey = null;
-        keyPasswordVisible = false;
-        show(Screen.KEYSTORE, R.layout.screen_keystore, true, R.color.cosmic_white);
-        ((TextView) screenView.findViewById(R.id.keystore_project)).setText(project.getName());
-        click(R.id.keystore_back, this::goBack);
-        click(R.id.key_copy, () -> { if (shownKey != null) copyKey(shownKey); });
-        click(R.id.key_export, () -> exportKeystore(project));
-        click(R.id.key_import, () -> importKeystoreFlow(project, () -> showKeystore(project)));
-        click(R.id.key_change, () -> showKeyForm(project, LanguageUi.KEY_CHANGE_TITLE, LanguageUi.KEY_CHANGE_FORM_MESSAGE, () -> { toast(LanguageUi.KEY_CHANGED); showKeystore(project); }));
-        click(R.id.keystore_password_toggle, () -> { keyPasswordVisible = !keyPasswordVisible; bindKeyDetails(); });
-        io.execute(() -> {
-            try {
-                ProjectKeys.Details details = keys().details(project.getName(), toolsDir());
-                runOnUiThread(() -> { if (screen == Screen.KEYSTORE && project.equals(keyProject)) { shownKey = details; bindKeyDetails(); } });
-            } catch (Exception e) {
-                runOnUiThread(() -> toast(LanguageUi.KEY_READ_FAILED + e.getMessage()));
-            }
-        });
-    }
-
-    private void bindKeyDetails() {
-        if (screen != Screen.KEYSTORE || shownKey == null) return;
-        ProjectKeys.Details d = shownKey;
-        String hidden = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022";
-        ((TextView) screenView.findViewById(R.id.keystore_active)).setText(d.name);
-        ((TextView) screenView.findViewById(R.id.keystore_type)).setText(d.isDefault ? LanguageUi.KEY_TYPE_DEFAULT : LanguageUi.KEY_TYPE_CUSTOM);
-        ((TextView) screenView.findViewById(R.id.keystore_alias)).setText(d.alias);
-        ((TextView) screenView.findViewById(R.id.keystore_store_password)).setText(keyPasswordVisible ? d.storePassword : hidden);
-        ((TextView) screenView.findViewById(R.id.keystore_key_password)).setText(keyPasswordVisible ? d.keyPassword : hidden);
-        ((TextView) screenView.findViewById(R.id.keystore_owner)).setText(d.subject);
-        ((TextView) screenView.findViewById(R.id.keystore_valid)).setText(d.validUntil);
-        ((TextView) screenView.findViewById(R.id.keystore_sha256)).setText(d.sha256);
-        ((TextView) screenView.findViewById(R.id.keystore_password_toggle)).setText(keyPasswordVisible ? LanguageUi.HIDE : LanguageUi.SHOW);
-    }
-
-    private void copyKey(ProjectKeys.Details details) {
-        ClipboardManager clipboard = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        ClipData clip = ClipData.newPlainText(getString(R.string.keystore), details.toClipboardText());
-        if (android.os.Build.VERSION.SDK_INT >= 33) {
-            android.os.PersistableBundle extras = new android.os.PersistableBundle();
-            extras.putBoolean(android.content.ClipDescription.EXTRA_IS_SENSITIVE, true);   // keeps keyboards and clipboard previews from showing the secrets
-            clip.getDescription().setExtras(extras);
-        }
-        clipboard.setPrimaryClip(clip);
-        toast(LanguageUi.KEY_COPIED);
-    }
-
-    // ---- export the key file of a project: ask alias + password, verify them, then pick the destination
-
-    private void exportKeystore(File project) {
-        ProjectKeys store = keys();
-        String name = project.getName();
-        boolean custom = store.isCustom(name);
-        java.util.Properties properties = custom ? store.read(name) : null;
-        if (custom && properties == null) { toast(LanguageUi.KEY_NO_FILE); return; }
-        File source = custom ? store.keystoreFile(name) : debugKeyFile();
-        if (!source.isFile()) {
-            if (!custom) { ensureDefaultKey(() -> exportKeystore(project)); return; }
-            toast(LanguageUi.KEY_NO_FILE);
-            return;
-        }
-        String alias = custom ? properties.getProperty("alias", "") : ApkSigningStage.DEBUG_KEY_ALIAS;
-        String message = custom ? LanguageUi.KEY_EXPORT_MESSAGE : LanguageUi.KEY_EXPORT_MESSAGE_DEBUG;
-        String fileName = safeName(name, "key") + (custom ? "" : "-debug") + ".p12";
-        credentialsDialog(LanguageUi.KEY_EXPORT_TITLE, message, alias, LanguageUi.KEY_EXPORT_ACTION, (a, sp, kp) -> io.execute(() -> {
-            try {
-                KeyStore keyStore = KeyStore.getInstance("PKCS12");
-                try (InputStream in = new FileInputStream(source)) { keyStore.load(in, sp.toCharArray()); }
-                if (keyStore.getKey(a, (kp.isEmpty() ? sp : kp).toCharArray()) == null) throw new IOException("alias not found");
-                runOnUiThread(() -> { pendingExportSource = source; exportKeystoreLauncher.launch(fileName); });
-            } catch (Exception e) {
-                runOnUiThread(() -> toast(LanguageUi.KEY_VERIFY_FAILED));
-            }
-        }));
-    }
-
-    private void exportKeystoreTo(Uri uri) {
-        File source = pendingExportSource;
-        if (source == null || !source.isFile()) return;
-        io.execute(() -> {
-            try (InputStream in = new FileInputStream(source); OutputStream out = getContentResolver().openOutputStream(uri, "wt")) {
-                if (out == null) throw new IOException("Could not open the destination");
-                copyStream(in, out);
-                runOnUiThread(() -> toast(LanguageUi.KEY_EXPORTED));
-            } catch (Exception e) {
-                runOnUiThread(() -> toast(LanguageUi.KEY_EXPORT_FAILED + e.getMessage()));
-            }
-        });
-    }
-
-    // ---- import a key file into one project: ask alias + password first, then pick the file
-
-    private void importKeystoreFlow(File project, Runnable afterImport) {
-        credentialsDialog(LanguageUi.KEY_IMPORT_TITLE, LanguageUi.KEY_IMPORT_MESSAGE, "", LanguageUi.CHOOSE_FILE, (a, sp, kp) -> {
-            keyProject = project; afterKeyImport = afterImport;
-            pendingImportAlias = a; pendingImportStorePassword = sp; pendingImportKeyPassword = kp;
-            pickKeystore.launch(new String[]{"*/*"});
-        });
-    }
-
-    private void importKeystore(Uri uri, String alias, String storePassword, String keyPasswordInput) {
-        final File project = keyProject;
-        final Runnable after = afterKeyImport;
-        if (project == null) return;
-        final String displayName = displayName(uri);
-        final String keyPassword = keyPasswordInput.isEmpty() ? storePassword : keyPasswordInput;
-        io.execute(() -> {
-            File temporary = new File(getCacheDir(), "import-keystore.tmp");
-            try {
-                try (InputStream in = getContentResolver().openInputStream(uri); OutputStream out = new FileOutputStream(temporary)) {
-                    if (in == null) throw new IOException("Could not read the selected file");
-                    copyStream(in, out);
-                }
-                KeyStore store = KeyStore.getInstance("PKCS12");
-                try (InputStream in = new FileInputStream(temporary)) { store.load(in, storePassword.toCharArray()); }
-                if (store.getKey(alias, keyPassword.toCharArray()) == null) throw new IOException("No private key was found for this alias and password.");
-                String base = displayName.toLowerCase(Locale.ROOT).endsWith(".p12") ? displayName.substring(0, displayName.length() - 4) : displayName;
-                keys().install(project.getName(), temporary, safeName(base, "key"), alias, storePassword, keyPassword);
-                runOnUiThread(() -> { toast(LanguageUi.KEY_IMPORTED); if (after != null) after.run(); });
-            } catch (Exception e) {
-                runOnUiThread(() -> toast(LanguageUi.KEY_IMPORT_FAILED + e.getMessage()));
-            } finally {
-                pendingImportStorePassword = ""; pendingImportKeyPassword = "";
-                temporary.delete();
-            }
-        });
-    }
-
-    // ---- change key: a form card that creates a new key for the project
-
-    /**
-     * The form is one scrolling card: the explanation, all fields and the Cancel / Change Key buttons are inside the same ScrollView
-     * (dialog_key_form.xml). A normal AlertDialog keeps its buttons outside the scroll area, and on a short window or with the
-     * keyboard open they ended up squeezed or hidden, so they could not be tapped. Here they can always be scrolled into view.
-     */
-    private void showKeyForm(File project, String title, String message, Runnable onChanged) {
-        View view = getLayoutInflater().inflate(R.layout.dialog_key_form, null);
-        ((TextView) view.findViewById(R.id.form_message)).setText(message);
-        EditText alias = view.findViewById(R.id.form_alias), password = view.findViewById(R.id.form_password), confirm = view.findViewById(R.id.form_password_confirm),
-            company = view.findViewById(R.id.form_company), organization = view.findViewById(R.id.form_organization), unit = view.findViewById(R.id.form_unit),
-            city = view.findViewById(R.id.form_city), state = view.findViewById(R.id.form_state), country = view.findViewById(R.id.form_country);
-        android.widget.Button cancelButton = view.findViewById(R.id.form_cancel), confirmButton = view.findViewById(R.id.form_confirm);
-        confirmButton.setText(LanguageUi.KEY_CHANGE_ACTION);
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this).setTitle(title).setView(view).create();
-        secureDialog(dialog);
-        if (dialog.getWindow() != null) {
-            // The window shrinks above the keyboard instead of sliding under it.
-            dialog.getWindow().setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE);
-        }
-        cancelButton.setOnClickListener(v -> dialog.dismiss());
-        confirmButton.setOnClickListener(v -> {
-            String a = alias.getText().toString().trim(), pw = password.getText().toString(), co = company.getText().toString().trim(),
-                org = organization.getText().toString().trim(), ou = unit.getText().toString().trim(), ci = city.getText().toString().trim(),
-                st = state.getText().toString().trim(), cc = country.getText().toString().trim();
-            if (a.isEmpty()) { alias.setError(LanguageUi.ALIAS_REQUIRED); alias.requestFocus(); return; }
-            if (pw.length() < 6) { password.setError(LanguageUi.PASSWORD_SHORT); password.requestFocus(); return; }
-            if (!pw.equals(confirm.getText().toString())) { confirm.setError(LanguageUi.PASSWORD_MISMATCH); confirm.requestFocus(); return; }
-            if (co.isEmpty()) { company.setError(LanguageUi.COMPANY_REQUIRED); company.requestFocus(); return; }
-            if (org.isEmpty()) { organization.setError(LanguageUi.ORGANIZATION_REQUIRED); organization.requestFocus(); return; }
-            if (!cc.matches("[A-Za-z]{2}")) { country.setError(LanguageUi.COUNTRY_INVALID); country.requestFocus(); return; }
-            dialog.dismiss();
-            toast(LanguageUi.KEY_CREATING);
-            io.execute(() -> {
-                try {
-                    keys().generate(project.getName(), a, pw, co, org, ou, ci, st, cc);
-                    runOnUiThread(onChanged);
-                } catch (Exception e) {
-                    runOnUiThread(() -> toast(LanguageUi.KEY_CREATE_FAILED + e.getMessage()));
-                }
-            });
-        });
-        dialog.show();
-    }
-
-    // ---- Export AAB (for Google Play) from the project menu
-
-    private void exportAabFlow(File project) {
-        if (buildService.isBuilding()) { toast(LanguageUi.BUILD_BUSY); return; }
-        if (keys().isCustom(project.getName())) { startAabBuild(project); return; }
-        // Still the Studio Mobile default key: Google Play needs the developer's own key, so ask for one first.
-        showKeyForm(project, LanguageUi.AAB_KEY_TITLE, LanguageUi.AAB_KEY_MESSAGE, () -> showAabReadyDialog(project));
-    }
-
-    private void showAabReadyDialog(File project) {
-        AlertDialog dialog = new MaterialAlertDialogBuilder(this).setTitle(LanguageUi.AAB_READY_TITLE).setMessage(LanguageUi.AAB_READY_MESSAGE)
-            .setPositiveButton(LanguageUi.EXPORT_AAB, (d, w) -> startAabBuild(project))
-            .setNegativeButton(LanguageUi.KEY_IMPORT_TITLE, (d, w) -> importKeystoreFlow(project, () -> showAabReadyDialog(project)))
-            .setNeutralButton(R.string.cancel, null).create();
-        secureDialog(dialog);
-        dialog.show();
-    }
-
-    private void startAabBuild(File project) {
-        if (buildService.isBuilding()) { toast(LanguageUi.BUILD_BUSY); return; }
-        currentProject = project; openedFile = null; openTabs.clear(); expanded.clear();
-        bundleNext = true;
-        showBuild(true);
-    }
+    File toolsDir() { return new File(getFilesDir(), "build-tools"); }
+    ProjectKeys keys() { return new ProjectKeys(getFilesDir()); }
 }
