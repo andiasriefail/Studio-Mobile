@@ -326,6 +326,7 @@ public final class ProjectBuildService {
             copiedProject = buildRoot;
             deleteRecursively(buildRoot);
             copyDirectory(project, buildRoot);
+            com.example.studiomobile.build.BuildFailureReport.begin(readAppName(buildRoot, project.getName()));   // error log file is named after the app
             if (new DebugModeSettings(appContext).isEnabled()) {
                 try { appendInfo(com.example.studiomobile.build.DebugModeInjector.inject(appContext, buildRoot)); }
                 catch (Exception failure) { appendShown("WARNING: Debug Mode could not be added: " + failure.getMessage()); }
@@ -413,7 +414,7 @@ public final class ProjectBuildService {
         }
     }
 
-    /** Writes the full log of a failed build to Studio Mobile/Build Error Logs (only the latest is kept). Never throws. */
+    /** Writes the full log of a failed build to Studio Mobile/Build Error Logs (one file per app: <app name>-erors-logs.txt). Never throws. */
     private void saveFailureReport(String stage, Throwable crash) {
         try {
             String detail = lastMessage == null || lastMessage.isEmpty() ? "Build failed." : lastMessage;

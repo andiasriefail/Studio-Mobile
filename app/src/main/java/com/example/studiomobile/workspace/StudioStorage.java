@@ -17,10 +17,10 @@ import java.io.File;
  * <pre>
  * Studio Mobile/
  *   My Project/          every project
- *   My Apk/              APKs saved with "Save APK"
+ *   My Application/      APKs saved with "Save APK"
  *   Export AAB/          App Bundles exported for Google Play
  *   Local/local_libs/    downloaded libraries, reused by later builds
- *   Build Error Logs/    the latest build error log (only one is kept)
+ *   Build Error Logs/    one build error log per app (<app name>-erors-logs.txt)
  * </pre>
  *
  * Shared storage needs "All files access" (Android 11+) or the storage permission (Android 8-9). Until it is granted, and on
@@ -30,11 +30,11 @@ import java.io.File;
 public final class StudioStorage {
     public static final String ROOT_NAME = "Studio Mobile";
     public static final String PROJECTS = "My Project";
-    public static final String APKS = "My Apk";
+    public static final String APKS = "My Application";
     public static final String LOCAL_LIBS = "Local/local_libs";
     public static final String EXPORT_AAB = "Export AAB";
     public static final String ERROR_LOGS = "Build Error Logs";
-    /** Crash and freeze reports of Studio Mobile itself. Separate from ERROR_LOGS because a failed build empties that folder. */
+    /** Crash and freeze reports of Studio Mobile itself. Kept apart from ERROR_LOGS, which only holds build error logs. */
     public static final String APP_CRASH_LOGS = "App Crash Logs";
     public static final int REQUEST_LEGACY_STORAGE = 4101;
 

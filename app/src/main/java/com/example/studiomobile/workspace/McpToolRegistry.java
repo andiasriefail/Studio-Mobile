@@ -371,7 +371,7 @@ public final class McpToolRegistry {
         File projectsRoot = files.getProjectsRoot();
         File appFiles = toolsDirectory.getParentFile();
         File appData = appFiles == null ? null : appFiles.getParentFile();   // holds files/ and cache/
-        File studioRoot = projectsRoot.getParentFile();                      // holds projects, My Apk, local libs, error logs
+        File studioRoot = projectsRoot.getParentFile();                      // holds projects, My Application, local libs, error logs
         result = replacePath(result, projectsRoot, "<projects>");
         result = replacePath(result, appFiles, "<app>");
         result = replacePath(result, appData, "<app-data>");
