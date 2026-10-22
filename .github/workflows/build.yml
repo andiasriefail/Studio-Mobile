@@ -129,6 +129,43 @@ jobs:
           done
           file "$dest/libpythonexe.so"
           ls -l "$dest"
+      - name: Download Node.js (andiasriefail/node-android-build) and bundle it for every ABI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NODE_MAJOR: '24'
+        run: |
+          set -euo pipefail
+          repo=andiasriefail/node-android-build
+          # Known-good pin for x86_64 (checked when the resolved asset has the same SHA-256 owner release).
+          x64_pinned=487cc205672d5c715a951835421e5eef4e2e3f629183c96ab0761c17a441f10b
+          # release arch  ->  Android ABI folder
+          for pair in arm64:arm64-v8a arm:armeabi-v7a x64:x86_64 ia32:x86; do
+            arch=${pair%%:*}; abi=${pair##*:}
+            tag="node-android-${arch}-${NODE_MAJOR}"
+            echo "== $arch -> $abi (release $tag)"
+            json=$(gh api "repos/$repo/releases/tags/$tag")
+            # Newest asset = highest version in node-android-<arch>-<version>.tar.xz
+            name=$(echo "$json" | jq -r '[.assets[].name | select(test("^node-android-.*\\.tar\\.xz$"))] | sort_by(capture("-(?<v>[0-9]+\\.[0-9]+\\.[0-9]+)\\.tar\\.xz$").v | split(".") | map(tonumber)) | last')
+            [ -n "$name" ] && [ "$name" != null ] || { echo "No tar.xz asset in $tag" >&2; exit 1; }
+            url=$(echo "$json" | jq -r --arg n "$name" '.assets[] | select(.name==$n) | .browser_download_url')
+            digest=$(echo "$json" | jq -r --arg n "$name" '.assets[] | select(.name==$n) | .digest // ""' | sed 's/^sha256://')
+            archive="$RUNNER_TEMP/$name"
+            curl -fsSL "$url" -o "$archive"
+            sum=$(sha256sum "$archive" | cut -d' ' -f1)
+            echo "$name sha256=$sum"
+            if [ -n "$digest" ] && [ "$sum" != "$digest" ]; then echo "SHA-256 mismatch for $name (release says $digest)" >&2; exit 1; fi
+            if [ "$arch" = x64 ] && [ "$sum" != "$x64_pinned" ]; then echo "::warning::x64 asset $name differs from the pinned SHA-256 ($x64_pinned). Update x64_pinned if this is a new Node version."; fi
+            dir="$RUNNER_TEMP/node-$arch"; rm -rf "$dir"; mkdir -p "$dir"
+            tar -xJf "$archive" -C "$dir"
+            exe=$(find "$dir" -path '*/bin/node' | head -n 1)
+            [ -n "$exe" ] || { echo "bin/node not found in $name" >&2; find "$dir" -maxdepth 3 | head -n 40 >&2; exit 1; }
+            dest="app/src/main/jniLibs/$abi"; mkdir -p "$dest"
+            # Android 10+ only executes files from the native library directory, so the binary ships as lib<name>.so.
+            cp "$(readlink -f "$exe")" "$dest/libnodeexe.so"
+            chmod 755 "$dest/libnodeexe.so"
+            file "$dest/libnodeexe.so"
+          done
+          ls -l app/src/main/jniLibs/*/libnodeexe.so
       - name: Cache the Dart SDK archive
         uses: actions/cache@v4
         with:
