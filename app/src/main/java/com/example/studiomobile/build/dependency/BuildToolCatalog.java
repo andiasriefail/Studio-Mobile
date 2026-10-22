@@ -15,7 +15,7 @@ import java.util.Locale;
 /** Parses a checksum-pinned tool catalog. The caller must pin the catalog SHA-256 in app code. */
 public final class BuildToolCatalog {
     /** SHA-256 of the checked-in catalog (assets/build-tools/catalog.json). Replace only alongside a reviewed app update. */
-    public static final String BUNDLED_CATALOG_SHA256 = "e550560ff1593ef09436a8b751942ad55f740ca6689ea1b803e182fe54d2a3e0";
+    public static final String BUNDLED_CATALOG_SHA256 = "17c087c83157ebfc4e055e06f9bedb0daf996630382d88f101460b27692c8854";
     public static final class Component {
         public final String id, version, url, installPath, sha256, license, abi, archive;
         public final long maxBytes;
