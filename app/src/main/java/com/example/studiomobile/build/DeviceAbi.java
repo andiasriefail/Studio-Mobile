@@ -10,7 +10,7 @@ import java.util.List;
  * Call {@link #requireArm64} before doing any download or build work so the person gets the real reason immediately, instead of a
  * misleading follow-up such as "No NDK found".
  *
- * <p>JavaScript (Rhino) and Java (ECJ) run inside the app process and work on every ABI, so they need no check.
+ * <p>Java (ECJ) runs inside the app process and JavaScript uses the Node.js binary bundled for every ABI, so neither needs a check.
  */
 public final class DeviceAbi {
     private static final List<String> SIXTY_FOUR_BIT = Arrays.asList("arm64-v8a", "x86_64", "riscv64");
