@@ -63,8 +63,8 @@ class ZipUi(private val host: MainActivity) {
             .setView(view)
             .setNegativeButton(R.string.cancel, null)
             .setPositiveButton(LanguageUi.ZIP_PASSWORD_IMPORT) { _, _ ->
-                val password = CharArray(input.length())
-                input.text.getChars(0, password.size, password, 0)   // the password is not trimmed and never stored as a String
+                val typed = input.text
+                val password = CharArray(typed?.length ?: 0) { index -> typed!![index] }   // the password is not trimmed and never stored as a String
                 importZip(zipUri, password, true)
             }.show()
     }

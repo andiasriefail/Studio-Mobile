@@ -14,7 +14,7 @@ import org.w3c.dom.Element
  *
  * The application name is read the way Android Studio does, not only from strings.xml:
  *  1. `android:label` of `<application>` in AndroidManifest.xml. Plain text is used as it is.
- *  2. `@string/xxx` is looked up in `res/values/*.xml` (the name does not have to be `app_name`).
+ *  2. `@string/xxx` is looked up in the XML files of `res/values` (the name does not have to be `app_name`).
  *  3. No usable label in the manifest: try the string named `app_name`.
  *  4. Nothing found: empty.
  * Not handled: `resValue` in Gradle and per-language `values-xx` translations.
@@ -105,7 +105,7 @@ object ProjectLabels {
         return value.ifEmpty { null }
     }
 
-    /** Every `<string>` in res/values/*.xml (any file name, default language only). */
+    /** Every `<string>` in the XML files of res/values (any file name, default language only). */
     private fun readStrings(valuesDir: File): Map<String, String> {
         val result = LinkedHashMap<String, String>()
         val files = valuesDir.listFiles { f -> f.isFile && f.name.endsWith(".xml") }?.sortedBy { it.name } ?: return result
