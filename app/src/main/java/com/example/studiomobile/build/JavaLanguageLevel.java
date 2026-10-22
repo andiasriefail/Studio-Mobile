@@ -145,7 +145,8 @@ public final class JavaLanguageLevel {
         } catch (NumberFormatException ignored) { return "0"; }
     }
 
-    private static String stripComments(String text) {
+    /** Removes block and line comments so that commented-out settings are not read as declarations (also used by the Gradle planner). */
+    public static String stripComments(String text) {
         return text.replaceAll("(?s)/\\*.*?\\*/", " ").replaceAll("(?m)(?<!:)//.*$", "");
     }
 }
