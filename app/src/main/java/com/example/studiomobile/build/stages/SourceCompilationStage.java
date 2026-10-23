@@ -51,7 +51,8 @@ public final class SourceCompilationStage implements BuildStage {
         classpath.addAll(BuildProjectFiles.localLibraries(context.getProjectDirectory()));
         classpath.addAll(BuildProjectFiles.jarsIn(context.getOutput("dependencyDirectory")));
         if (generated != null && generated.isDirectory()) javaRoots.add(generated);
-        String hint = context.getAttribute("unsupportedProcessors") == null ? "" : "\n" + context.getAttribute("unsupportedProcessors");
+        String hint = "";
+        for (String name : new String[] {"skippedDependencies", "unsupportedProcessors"}) if (context.getAttribute(name) != null) hint += "\n" + context.getAttribute(name);
 
         if (!kotlin.isEmpty()) {
             InProcessCompilerEngine.CompilationOutput result = compiler.compileKotlin(kotlin, javaRoots, androidJar, classpath, classes, javaLevel);

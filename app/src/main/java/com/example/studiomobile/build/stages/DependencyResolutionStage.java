@@ -45,10 +45,12 @@ public final class DependencyResolutionStage implements BuildStage {
         List<GradleDependencyParser.Platform> platforms = new ArrayList<>();
         List<GradleDependencyParser.Declaration> processors = new ArrayList<>();
         List<String> unsupportedProcessors = new ArrayList<>();
+        List<String> skippedDependencies = new ArrayList<>();
         for (ProjectModules.Module module : modules.all()) {
             GradleDependencyParser parsed = GradleDependencyParser.parse(project, module.directory);
             String prefix = modules.isMultiModule() ? module.path + ": " : "";
             for (String warning : parsed.warnings) if (logger != null) logger.onWarning(prefix + warning);
+            for (String skipped : parsed.skipped) skippedDependencies.add(prefix + skipped);
             mergeDeclarations(declarations, parsed.declarations);
             for (GradleDependencyParser.Platform platform : parsed.platforms) {
                 boolean known = false;
@@ -66,6 +68,15 @@ public final class DependencyResolutionStage implements BuildStage {
                 + ". Classes those processors would generate (Room, Hilt, Moshi codegen, ...) will be missing.";
             if (logger != null) logger.onWarning(note);
             context.putAttribute("unsupportedProcessors", note);
+        }
+        if (!skippedDependencies.isEmpty()) {
+            // The build goes on without them. If the code needs one, the compiler will complain about a missing class: this tells where to look first.
+            StringBuilder note = new StringBuilder(skippedDependencies.size() + " declared librar" + (skippedDependencies.size() == 1 ? "y was" : "ies were")
+                + " left out of the build. If the compiler reports a missing class or package, check these first:");
+            for (int i = 0; i < skippedDependencies.size() && i < 8; i++) note.append("\n - ").append(skippedDependencies.get(i));
+            if (skippedDependencies.size() > 8) note.append("\n - ... and ").append(skippedDependencies.size() - 8).append(" more (see the warnings above)");
+            if (logger != null) logger.onWarning(note.toString());
+            context.putAttribute("skippedDependencies", note.toString());
         }
         if (!processors.isEmpty()) resolveProcessors(context, processors, platforms, logger);
         if (declarations.isEmpty()) { if (logger != null) logger.onInfo("No library dependencies declared; nothing to download."); return; }
@@ -174,7 +185,8 @@ public final class DependencyResolutionStage implements BuildStage {
     private static void mergeDeclarations(List<GradleDependencyParser.Declaration> into, List<GradleDependencyParser.Declaration> more) {
         for (GradleDependencyParser.Declaration d : more) {
             boolean known = false;
-            for (GradleDependencyParser.Declaration other : into) if (other.group.equals(d.group) && other.artifact.equals(d.artifact) && other.version.equals(d.version)) known = true;
+            for (GradleDependencyParser.Declaration other : into) if (other.group.equals(d.group) && other.artifact.equals(d.artifact) && other.version.equals(d.version)
+                && other.classifier.equals(d.classifier) && other.extension.equals(d.extension)) known = true;
             if (!known) into.add(d);
         }
     }
