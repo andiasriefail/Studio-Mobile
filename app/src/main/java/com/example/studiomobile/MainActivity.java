@@ -343,7 +343,7 @@ public class MainActivity extends AppCompatActivity {
             case EDITOR: {
                 DrawerLayout drawer = screenView.findViewById(R.id.editor_drawer);
                 if (drawer != null && drawer.isDrawerOpen(GravityCompat.START)) { drawer.closeDrawer(GravityCompat.START); }
-                else confirmLeave(this::showHome);
+                else confirmExitToHome();
                 break;
             }
             case PREVIEW: if (previewPhone == null || !previewPhone.goBack()) showEditor(); break;   // first the preview's own screens, then the preview itself
@@ -375,6 +375,25 @@ public class MainActivity extends AppCompatActivity {
             .setTitle(LanguageUi.UNSAVED_TITLE).setMessage(LanguageUi.UNSAVED_MESSAGE)
             .setNegativeButton(LanguageUi.UNSAVED_CANCEL, null)
             .setPositiveButton(LanguageUi.UNSAVED_CONFIRM, (d, w) -> { if (saveCurrent(false)) proceed.run(); })
+            .show();
+    }
+
+    private AlertDialog exitDialog;
+
+    /**
+     * Every way from the code editor back to the project list (All projects in the drawer, the Android back button) asks first.
+     * The live wallpaper video is stopped the moment the question appears: its decoder is freed before the screen changes, so leaving does not
+     * stutter, and "No" continues the video from where it stopped. "Yes and Save" saves the open file and leaves; if saving fails the editor stays.
+     */
+    private void confirmExitToHome() {
+        if (exitDialog != null && exitDialog.isShowing()) return;
+        wallpaperUi.suspendVideo();
+        boolean[] leaving = {false};
+        exitDialog = new MaterialAlertDialogBuilder(this)
+            .setMessage(R.string.exit_confirm_message)
+            .setNegativeButton(R.string.exit_confirm_no, null)
+            .setPositiveButton(R.string.exit_confirm_yes_save, (d, w) -> { if (saveCurrent(false)) { leaving[0] = true; showHome(); } })
+            .setOnDismissListener(d -> { if (!leaving[0]) wallpaperUi.unsuspendVideo(); })
             .show();
     }
 
@@ -789,7 +808,7 @@ public class MainActivity extends AppCompatActivity {
         refreshDebugIcon();
         click(R.id.editor_save, () -> saveCurrent(true));
         click(R.id.editor_wrap, () -> { wrapOn = !wrapOn; applyWrap(); });
-        click(R.id.drawer_all_projects, () -> confirmLeave(this::showHome));
+        click(R.id.drawer_all_projects, this::confirmExitToHome);
         click(R.id.tree_upload, () -> startUpload(currentProject));
         click(R.id.tree_add_file, () -> createItem(currentProject, false));
         click(R.id.tree_add_folder, () -> createItem(currentProject, true));

@@ -196,6 +196,8 @@ class WallpaperUi(private val host: MainActivity) {
     private var player: MediaPlayer? = null
     private var playerSurface: Surface? = null
     private var resumeAt = 0
+    /** True while a question is on screen (leaving the editor): the player stays released until the answer is "no". */
+    private var suspended = false
 
     private fun attachVideo(poster: ImageView, settings: WallpaperSettings) {
         val parent = poster.parent as? FrameLayout ?: return
@@ -215,7 +217,7 @@ class WallpaperUi(private val host: MainActivity) {
 
     private fun startVideo(settings: WallpaperSettings) {
         val tv = textureView ?: return
-        if (!foreground || player != null || host.screen != MainActivity.Screen.EDITOR) return
+        if (!foreground || suspended || player != null || host.screen != MainActivity.Screen.EDITOR) return
         val texture = tv.surfaceTexture
         if (!tv.isAvailable || texture == null || !settings.isVideo) return
         val surface = Surface(texture)
@@ -244,14 +246,14 @@ class WallpaperUi(private val host: MainActivity) {
         }
     }
 
-    /** Scales the video so it fills the area and crops the overflow (like the picture's centerCrop). */
+    /** Scales the video to fit inside the area, centered, so nothing is cut off (like the picture's fitCenter). The rest of the area keeps the editor's background. */
     private fun fitVideo(tv: TextureView, p: MediaPlayer) {
         val videoW = p.videoWidth.toFloat()
         val videoH = p.videoHeight.toFloat()
         val w = tv.width.toFloat()
         val h = tv.height.toFloat()
         if (videoW <= 0f || videoH <= 0f || w <= 0f || h <= 0f) return
-        val scale = maxOf(w / videoW, h / videoH)
+        val scale = minOf(w / videoW, h / videoH)
         val matrix = Matrix()
         matrix.setScale(videoW * scale / w, videoH * scale / h, w / 2f, h / 2f)
         tv.setTransform(matrix)
@@ -265,6 +267,21 @@ class WallpaperUi(private val host: MainActivity) {
         try { p.release() } catch (ignored: Exception) { }
         playerSurface?.release()
         playerSurface = null
+    }
+
+    /**
+     * Stops the player right now and keeps it stopped, remembering the position. Used the moment the "Are you sure you want to exit?" dialog
+     * appears, so the video's decoder and surface are already freed before the screen change and the exit does not stutter.
+     */
+    fun suspendVideo() {
+        suspended = true
+        stopPlayer(true)
+    }
+
+    /** The answer was "no": play again from where it stopped. */
+    fun unsuspendVideo() {
+        suspended = false
+        if (host.screen == MainActivity.Screen.EDITOR) startVideo(WallpaperSettings(host))
     }
 
     /** The app went to the background: stop playing but remember the position. */
@@ -281,6 +298,7 @@ class WallpaperUi(private val host: MainActivity) {
 
     /** The editor is left (home, build, preview, ...) or closed: stop and free the player; the next visit to the editor starts from the beginning. */
     fun releaseVideo() {
+        suspended = false
         stopPlayer(false)
         textureView = null
         resumeAt = 0
