@@ -93,7 +93,7 @@ public final class ProjectScaffoldGenerator {
 
     private static final String VERSION_CATALOG =
         "# Version catalog. Studio Mobile resolves a library when build.gradle references it as libs.<alias>.\n"
-        + "# Not supported yet: libs.bundles.*, BOM/platform() versions, dynamic versions (+), classifiers.\n"
+        + "# Supported: libs.bundles.*, platform()/enforcedPlatform() BOMs, dynamic versions (1.+, [1.0,2.0), latest.release) and classifiers in build.gradle (g:a:v:classifier, g:a:v@aar).\n# Not supported: versions built from variables, latest.integration, and classifiers inside this catalog.\n"
         + "[versions]\n"
         + "agp = \"" + AGP_VERSION + "\"\n\n"
         + "[libraries]\n"
