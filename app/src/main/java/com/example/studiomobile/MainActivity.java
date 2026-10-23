@@ -790,13 +790,17 @@ public class MainActivity extends AppCompatActivity {
         final File dir = new File(projectsDir(), name);
         if (dir.exists()) { toast(LanguageUi.PROJECT_EXISTS); return; }
         final String label = wizardAppName();
+        // snapshot the wizard values now: the io thread must not read fields the user can still change
+        final int chosenVersionCode = versionCode, chosenMinSdk = minSdk, chosenTargetSdk = targetSdk;
+        final String chosenVersionName = wizardVersionName();
         final Bitmap chosenIcon = iconBitmap;
         final int[] chosenSizes = iconSizes.clone();
         io.execute(() -> {
             if (!dir.mkdirs()) { runOnUiThread(() -> toast(LanguageUi.CREATE_FAILED + "could not create the project folder")); return; }
             try {
                 // the chosen picture becomes real resource files (mipmap-*/ic_launcher.png ...) and the manifest points to them
-                ProjectScaffoldGenerator.generate(dir, name, label, pkg, chosenIcon == null ? null : LauncherIconFiles.build(chosenIcon, chosenSizes));
+                ProjectScaffoldGenerator.generate(dir, name, label, pkg, chosenIcon == null ? null : LauncherIconFiles.build(chosenIcon, chosenSizes),
+                    chosenVersionCode, chosenVersionName, chosenMinSdk, chosenTargetSdk);
                 writePlayStoreIcon(name, chosenIcon);   // never stops the project from being created
                 runOnUiThread(() -> { toast(LanguageUi.PROJECT_CREATED); openProject(dir); });
             } catch (IOException | RuntimeException error) {
