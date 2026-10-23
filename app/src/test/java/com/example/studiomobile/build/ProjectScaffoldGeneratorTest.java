@@ -94,6 +94,22 @@ public class ProjectScaffoldGeneratorTest {
         assertEquals("mine", read("app/src/main/AndroidManifest.xml"));
     }
 
+    @Test public void writesLauncherIconFilesAndPointsTheManifestAtThem() throws IOException {
+        java.util.Map<String, byte[]> icons = new java.util.LinkedHashMap<>();
+        icons.put("app/src/main/res/mipmap-hdpi/ic_launcher.png", new byte[]{1, 2, 3});
+        List<String> created = ProjectScaffoldGenerator.generate(project, "demo", "Demo", "com.example.demo", icons);
+        assertTrue(created.contains("app/src/main/res/mipmap-hdpi/ic_launcher.png"));
+        assertEquals(3, new File(project, "app/src/main/res/mipmap-hdpi/ic_launcher.png").length());
+        String manifest = read("app/src/main/AndroidManifest.xml");
+        assertTrue(manifest.contains("android:icon=\"@mipmap/ic_launcher\""));
+        assertTrue(manifest.contains("android:roundIcon=\"@mipmap/ic_launcher_round\""));
+    }
+
+    @Test public void manifestHasNoIconAttributesWithoutAnIcon() throws IOException {
+        ProjectScaffoldGenerator.generate(project, "demo", "Demo", "com.example.demo");
+        assertFalse(read("app/src/main/AndroidManifest.xml").contains("android:icon"));
+    }
+
     @Test public void rejectsInvalidPackage() throws IOException {
         try { ProjectScaffoldGenerator.generate(project, "demo", "Demo", "Not A Package"); fail("expected IllegalArgumentException"); }
         catch (IllegalArgumentException expected) { assertEquals(0, project.list().length); }
