@@ -1587,10 +1587,22 @@ public class MainActivity extends AppCompatActivity {
             }
             return false;
         });
+        // The log is wrapped to the width of the screen, so it is laid out again once the width is known or changes (rotation, split screen).
+        screenView.findViewById(R.id.log_scroll).addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            if (r - l != or - ol) scheduleBuildRender();
+        });
         if (start && !buildService.isBuilding()) startBuild(); else renderBuildState();
     }
 
     private boolean logTouching;
+
+    /** How many monospace characters fit in one line of the log. 0 (no wrapping) until the view has a width. */
+    private int logColumns(TextView text, View scroll) {
+        int width = scroll.getWidth() - text.getPaddingLeft() - text.getPaddingRight();
+        float charWidth = text.getPaint().measureText("M");
+        if (width <= 0 || charWidth <= 0) return 0;
+        return Math.max(24, (int) (width / charWidth) - 1);   // one column of margin so a full line never wraps by itself
+    }
 
     /** While a build runs the log is redrawn about once a second so the running clock on its last line keeps ticking. */
     private final Runnable buildLiveTick = new Runnable() {
@@ -1640,7 +1652,7 @@ public class MainActivity extends AppCompatActivity {
         // While the reader holds a text selection, a running build does not replace the text under their finger.
         boolean selecting = building && (full.hasSelection() || logTouching);
         if (!selecting) {
-            String logText = buildService.getDisplayLog();
+            String logText = buildService.getDisplayLog(logColumns(full, scroll));   // wrapped to the screen: text stays in its own column
             String shown = logText.isEmpty() ? getString(R.string.no_output) : tailOfLog(logText);
             // Same text as before: touching it would only reset the cursor and make the ScrollView jump.
             if (!shown.equals(full.getTag(R.id.full_log_text))) {
