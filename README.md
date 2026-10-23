@@ -14,15 +14,17 @@ IDE Android yang berjalan **langsung di HP**: menulis kode, build APK/AAB, menja
 4. [Gradle dan AGP](#gradle-dan-agp)
 5. [Bahasa lain](#bahasa-lain)
 6. [Menjalankan kode di editor (Run)](#menjalankan-kode-di-editor-run)
-7. [Struktur project multi-bahasa](#struktur-project-multi-bahasa)
-8. [Preview (XML dan WebView)](#preview-xml-dan-webview)
-9. [Dependensi, Repository URL, dan JitPack](#dependensi-repository-url-dan-jitpack)
-10. [Keamanan jaringan: HTTP diblokir, hanya HTTPS](#keamanan-jaringan-http-diblokir-hanya-https)
-11. [Debug Mode](#debug-mode)
-12. [MCP dan Relay Server](#mcp-dan-relay-server)
-13. [Fitur IDE](#fitur-ide)
-14. [Keterbatasan](#keterbatasan)
-15. [Build Studio Mobile sendiri](#build-studio-mobile-sendiri)
+7. [Membuat project baru](#membuat-project-baru)
+8. [Struktur project multi-bahasa](#struktur-project-multi-bahasa)
+9. [Preview (XML dan WebView)](#preview-xml-dan-webview)
+10. [Dependensi, Repository URL, dan JitPack](#dependensi-repository-url-dan-jitpack)
+11. [Keamanan jaringan: HTTP diblokir, hanya HTTPS](#keamanan-jaringan-http-diblokir-hanya-https)
+12. [Debug Mode](#debug-mode)
+13. [Wallpaper editor (foto dan video live)](#wallpaper-editor-foto-dan-video-live)
+14. [MCP dan Relay Server](#mcp-dan-relay-server)
+15. [Fitur IDE](#fitur-ide)
+16. [Keterbatasan](#keterbatasan)
+17. [Build Studio Mobile sendiri](#build-studio-mobile-sendiri)
 
 ---
 
@@ -36,14 +38,19 @@ IDE Android yang berjalan **langsung di HP**: menulis kode, build APK/AAB, menja
 | Build lokal | Ya, tanpa JDK dan tanpa Gradle |
 | Build Gradle + JDK | Ya, JDK **11, 17, 21, 25, 27** |
 | Python | CPython 3.14.8, **arm64-v8a saja** |
-| Dart | 3.13.5, **arm64-v8a saja** (tanpa Flutter dan tanpa pub) |
+| Dart | 3.13.5, **arm64-v8a saja** (Dart murni, tanpa pub) |
+| Flutter | SDK 3.47.7, **arm64-v8a saja**. Tahap awal: SDK dipasang dan dicek di HP, **APK Flutter belum bisa dibuat** |
 | C/C++ | NDK r29 (clang) di HP, **arm64-v8a saja** |
 | JavaScript | **Node.js 24.x asli**, semua ABI (arm64-v8a, armeabi-v7a, x86_64, x86) |
 | JSX / TSX / TS | Diubah ke JavaScript saat build (Sucrase lewat QuickJS) |
 | Run dari editor | Python, JavaScript, Dart, Java, dan Kotlin (satu file, output langsung) |
 | Preview | Layout XML dan halaman HTML/WebView, tanpa build APK |
 | Repository | Google, Maven Central, **JitPack**, dan URL Maven HTTPS lain |
-| Debug Mode | Penangkap crash di aplikasi hasil build |
+| Annotation processor | Dagger, AutoValue, Glide, ButterKnife, MapStruct, dan sejenisnya, **untuk sumber Java** (tanpa kapt) |
+| Pemeriksaan crash | Build lokal berhenti bila ada crash yang pasti terjadi, sebelum APK dibuat |
+| Project baru | Wizard 4 langkah (ikon, identitas, versi, versi Android) dengan file awal siap build |
+| Wallpaper editor | Foto, atau **video live maksimal 60 detik**, di belakang code editor |
+| Debug Mode | Penangkap crash di aplikasi hasil build, dan untuk Studio Mobile sendiri |
 | MCP | Relay milik sendiri, untuk Claude, ChatGPT, dan Gemini CLI |
 | Output | APK (tertandatangani), AAB untuk Google Play |
 
@@ -51,7 +58,7 @@ IDE Android yang berjalan **langsung di HP**: menulis kode, build APK/AAB, menja
 
 ## Dua build engine
 
-Studio Mobile memilih engine otomatis untuk setiap project.
+Studio Mobile memilih engine otomatis untuk setiap project. Project **Flutter** dikenali lebih dulu dan memakai jalur terpisah (lihat [Flutter](#flutter-arm64-v8a-saja-tahap-awal)).
 
 ### 1. Build lokal (default, ringan)
 
@@ -62,6 +69,8 @@ ECJ (Java) + compiler Kotlin → D8/R8 → aapt2 → zipalign → tanda tangan A
 - Cocok untuk project sederhana yang hanya memakai plugin `com.android.application`, `com.android.library`, `kotlin-android`, `java`, `java-library`, `org.jetbrains.kotlin.jvm`
 - Membaca `build.gradle` / `build.gradle.kts` dengan parser sendiri (bukan menjalankan Gradle). Tulis `compileSdk`, `targetSdk`, `minSdk` sebagai angka biasa, bukan variabel
 - Mendukung modul library, AAR, view binding, BuildConfig, manifest merging, dan code shrinking (R8) mengikuti `minifyEnabled`
+- Menjalankan **annotation processor** Java di HP (Dagger, AutoValue, Glide, ButterKnife, MapStruct, ...): processor diubah ke DEX, dimuat lewat `DexClassLoader`, lalu dijalankan oleh ECJ dengan `-proc:only`. Kode hasil generate ikut dikompilasi. Hanya sumber Java yang dibaca; Kotlin yang butuh kapt tidak didukung
+- Menjalankan [pemeriksaan sebelum build](#pemeriksaan-sebelum-build-build-lokal)
 - **Satu-satunya engine yang bisa Export AAB**
 
 ### 2. Build Gradle + JDK
@@ -75,6 +84,21 @@ Dipakai otomatis bila project:
 Studio Mobile memilih **Gradle dan JDK sekaligus** berdasarkan kebutuhan project (versi wrapper, AGP, level Java) dan tabel kompatibilitas AGP/Gradle/JDK. Versi Gradle dari wrapper dicoba lebih dulu; versi lain hanya dipakai bila tidak bisa dijalankan.
 
 Task yang dijalankan: `assembleDebug`.
+
+### Pemeriksaan sebelum build (build lokal)
+
+Setelah kompilasi, build lokal mencari masalah yang **lolos kompilasi tetapi pasti membuat aplikasi crash**, supaya APK rusak tidak pernah dibuat. Hanya kasus yang pasti yang dilaporkan, tanpa menebak. Build **dihentikan** dengan pesan *"App would crash at runtime; build stopped, no APK was generated."* bila:
+
+- compiler melaporkan *Null pointer access* yang pasti terjadi (bentuk *Potential null pointer access* diabaikan)
+- `<activity>`, `<service>`, `<receiver>`, atau `<provider>` di manifest menunjuk class yang tidak ada di kode hasil kompilasi
+- sebuah Activity dipanggil lewat `Intent` tetapi belum dideklarasikan di `AndroidManifest.xml`
+- sebuah komponen punya `intent-filter` tetapi tanpa `android:exported`, padahal `targetSdk` 31 ke atas mewajibkannya (APK tidak bisa dipasang)
+
+Satu pemeriksaan hanya **peringatan** di log dan tidak menghentikan build: kode memakai kelas jaringan (`HttpURLConnection`, `Socket`, ...) tetapi manifest tidak punya izin `INTERNET`.
+
+### Build berjalan di latar belakang
+
+Build dijalankan di sebuah *foreground service*, jadi tetap lanjut walau aplikasi ditinggalkan atau layar mati. Selama build tampil notifikasi berjalan berisi langkah saat ini, bar progres, waktu berjalan, dan tombol **Stop**; saat selesai diganti notifikasi hasil. Aplikasi meminta sekali agar dikecualikan dari penghematan baterai, dan pilihannya ada di dialog sistem.
 
 ---
 
@@ -132,7 +156,14 @@ Catatan: baris AGP 7.x ditandai `verify: true`, belum dicocokkan dengan tabel re
 
 - Dart SDK 3.13.5. `src/main/dart/main.dart` dikompilasi ke kernel dan dikemas ke APK bersama Dart VM
 - Dipanggil dari Java/Kotlin lewat kelas `studio.dart.StudioDart`
-- Hanya core library Dart. **Tidak ada pub package, tidak ada Flutter**
+- Hanya core library Dart. **Tidak ada pub package**. Untuk project Flutter lihat bagian berikutnya
+
+### Flutter (arm64-v8a saja, tahap awal)
+
+- Project dianggap Flutter bila punya `pubspec.yaml` dengan dependensi `flutter: sdk: flutter` **dan** folder `android/` berisi file Gradle. Project Dart murni (tanpa dependensi Flutter) tetap lewat jalur Dart. Bila `android/` belum ada, buat di komputer dengan `flutter create --platforms=android .` lalu pindahkan project lagi
+- Hanya HP **arm64-v8a**. Di HP lain build berhenti dengan pesan bahwa Flutter butuh HP arm64
+- Pertama kali dipakai, Flutter SDK 3.47.7 (arsip sekitar 550 MB, butuh sekitar 2 GB ruang kosong) diunduh sekali dan SHA-256-nya diverifikasi. Tiga executable (`dart`, `gen_snapshot`, `impellerc`) ikut di dalam APK sebagai `libflutterdart.so`, `libgensnapshot.so`, dan `libimpellerc.so`, karena Android 10+ hanya mengizinkan eksekusi dari folder native library aplikasi
+- **Status sekarang:** build memasang SDK lalu mengecek apakah tool Flutter bisa berjalan di HP. Hasil cek ada di Build Logs pada baris `[flutter-check]`. **Langkah pembuatan APK belum tersedia**, jadi build project Flutter masih berakhir dengan status gagal beserta penjelasan ini
 
 ### C/C++ (arm64-v8a saja)
 
@@ -160,7 +191,7 @@ Studio Mobile bisa **menjalankan satu file langsung di HP**, tanpa membuild APK.
 |---|---|---|---|---|
 | `.py` | Run with Python | CPython 3.14.8 | 120 detik | **arm64-v8a saja**. Run pertama mengunduh standard library sekali |
 | `.js`, `.mjs` | Run with JavaScript | Node.js 24.x asli (`libnodeexe.so`) | 120 detik | Semua ABI. `.js` = CommonJS, `.mjs` = ES module |
-| `.dart` | Run with Dart | Dart VM 3.13.5 | 180 detik | **arm64-v8a saja**. Hanya core library, tanpa pub dan Flutter |
+| `.dart` | Run with Dart | Dart VM 3.13.5 | 180 detik | **arm64-v8a saja**. Hanya core library, tanpa pub dan tanpa Flutter |
 | `.java` | Run with Java | ECJ → D8 → `main()` di proses terpisah | 120 detik | File harus punya `public static void main(String[] args)` |
 | `.kt` | Run with Kotlin | Compiler Kotlin → D8 → `main()` di proses terpisah | 120 detik | File harus punya fungsi `main` |
 
@@ -222,6 +253,40 @@ Halo dari Python 3.14.8
 
 [process finished with exit code 0]
 ```
+
+---
+
+## Membuat project baru
+
+Tombol buat project di Home membuka wizard **4 langkah**:
+
+| Langkah | Isi |
+|---|---|
+| 1. App icon | Pilih gambar; dipotong persegi dari tengah. Ukuran ikon mdpi, hdpi, xhdpi, dan xxhdpi bisa diatur 16 sampai 512 px (bawaan 48, 72, 96, 144; xxxhdpi dihitung otomatis) |
+| 2. Identity | Nama project, nama aplikasi, dan package. Package kosong menjadi `com.example.<nama project>` |
+| 3. Version | `versionCode` (bawaan 1) dan `versionName` (bawaan `1.0`) |
+| 4. Android versions | Min SDK dan Target SDK, API 21 sampai 37. Bawaan 23 dan 35. Min SDK tidak bisa melebihi Target SDK. Ringkasan tampil di bagian bawah |
+
+Semua pilihan wizard ditulis ke `app/build.gradle` apa adanya (`minSdk`, `targetSdk`, `versionCode`, `versionName`), sehingga daftar project, editor, dan build membaca nilai yang sama. `compileSdk` bernilai 37, atau lebih tinggi bila Target SDK lebih tinggi.
+
+**File yang dibuat** (file yang sudah ada tidak pernah ditimpa; bila ada langkah yang gagal, semua yang sudah ditulis dihapus lagi):
+
+```
+settings.gradle
+build.gradle
+gradle/libs.versions.toml        (AGP 8.13.1)
+app/build.gradle                 (Groovy DSL, Java 17)
+app/proguard-rules.pro
+app/src/main/AndroidManifest.xml (tanpa atribut package; namespace ada di build.gradle)
+app/src/main/java/<package>/MainActivity.java
+app/src/main/res/values/strings.xml
+app/src/main/res/values/themes.xml
+app/src/main/res/mipmap-*/ic_launcher.png   (bila ikon dipilih)
+```
+
+Tidak dibuat: `gradlew` dan `gradle/wrapper`, `gradle.properties`, `.gitignore`, `local.properties`. Project baru dibuild oleh **build lokal**.
+
+Bila ikon dipilih, ikon toko **512 x 512 px** (PNG, siap untuk Google Play Console) juga disimpan di `Studio Mobile/Icon Google Play Console/<nama project>/ic_launcher-playstore.png`. Folder itu selalu dibuat, dan kosong bila tidak ada ikon.
 
 ---
 
@@ -772,6 +837,37 @@ Contoh isi alur: aplikasi memanggil `Integer.parseInt("abc")` → halaman crash 
 - Bila `AndroidManifest.xml` tidak punya elemen `<application>` atau package name tidak bisa ditentukan, Debug Mode dilewati dan alasannya ditulis di log build
 - Ini tidak sama dengan **Build Error Logs**, yaitu log kegagalan *saat build*. Debug Mode untuk crash *saat aplikasi berjalan*
 
+### Debug Mode untuk Studio Mobile sendiri
+
+Bagian di atas untuk aplikasi **hasil build**. Studio Mobile juga punya penangkap crash untuk **dirinya sendiri**: nyalakan atau matikan di **Settings** (bawaannya **menyala**).
+
+- Terpasang sebelum `Application.onCreate()`, sehingga crash di mana pun ikut tertangkap: editor, compiler, unduhan dependensi, dan proses `:javarun`
+- Stack trace disimpan dan ditampilkan di halaman layar penuh pada proses terpisah
+- Penutupan yang tidak bisa dilihat handler Java (sistem mematikan aplikasi karena memori, crash native, ANR) dipulihkan saat aplikasi dibuka lagi lewat `ApplicationExitInfo`, **Android 11 ke atas**
+
+---
+
+## Wallpaper editor (foto dan video live)
+
+Buka dari **Settings → Change Wallpaper**. Gambar atau video tampil di belakang **code editor**.
+
+**Foto**
+
+- Dipilih dari galeri; bila HP tidak punya aplikasi galeri, dipakai pemilih file
+- Dikecilkan hingga sisi terpanjang maksimal 2048 px, rotasi EXIF diterapkan, lalu disimpan sebagai JPEG kualitas 90 di penyimpanan privat aplikasi. Wallpaper tetap jalan walau file aslinya dipindah atau izinnya hilang
+
+**Video live**
+
+- Tombol **Choose video**. Durasi maksimal **60 detik** (toleransi 0,5 detik) dan ukuran file maksimal 500 MB. Video lebih panjang ditolak dengan pesan *"The video is longer than 60 seconds. Choose a shorter one."*
+- Diputar **tanpa suara** dan **berulang terus**; tidak mengambil audio focus, jadi musik yang sedang diputar tidak terganggu
+- Hanya diputar di **code editor**. Berhenti di Home, Preview, dan Build, serta jeda saat Anda keluar dari aplikasi, lalu lanjut dari posisi terakhir saat kembali
+- Frame pertama disimpan sebagai gambar diam dan dipakai sebagai pratinjau serta tampilan awal sebelum video siap
+
+**Pengaturan**
+
+- Slider **Darkness** 0 sampai 85% (bawaan 55%): lapisan biru malam di atas gambar supaya kode tetap terbaca di atas gambar yang terang
+- Tombol **Remove** menghapus wallpaper. Hanya satu wallpaper aktif: memilih foto menggantikan video, dan sebaliknya
+
 ---
 
 ## MCP dan Relay Server
@@ -951,7 +1047,10 @@ Saat AI mengubah file, editor dan preview yang sedang terbuka ikut diperbarui. P
 - Editor dengan syntax highlighting dan **preview** (layout XML, WebView, React/JSX)
 - Import project dari ZIP (termasuk berpassword) atau folder; **Export Project To Zip** dengan picker bawaan Android
 - Keystore: buat key sendiri atau import `.p12`; Export AAB untuk Google Play
-- **Debug Mode** (penangkap crash di aplikasi hasil build)
+- **Wallpaper editor**: foto atau video live (maks. 60 detik) di belakang editor
+- **Wizard project baru** dengan ikon, versi, dan SDK pilihan Anda, plus ikon Google Play 512 x 512
+- **Debug Mode** (penangkap crash di aplikasi hasil build, dan untuk Studio Mobile sendiri)
+- Build berjalan di latar belakang dengan notifikasi progres dan tombol Stop
 - **MCP relay** agar asisten AI bisa membaca, mengedit, dan membuild project dari HP
 - Build Error Logs per aplikasi: `<nama app>-erors-logs.txt`
 
@@ -961,27 +1060,42 @@ Saat AI mengubah file, editor dan preview yang sedang terbuka ikut diperbarui. P
 My Project/        semua project
 My Application/    APK hasil "Save APK"
 Export AAB/        AAB untuk Google Play
+Icon Google Play Console/  ikon toko 512 x 512 per project
 Local/local_libs/  library hasil unduhan
 Build Error Logs/  satu log error per aplikasi
 ```
 
 Butuh izin "All files access" (Android 11+) agar folder berada di penyimpanan bersama. Tanpa izin, struktur yang sama dibuat di penyimpanan privat aplikasi.
 
+**Izin yang diminta aplikasi**
+
+| Izin | Untuk apa |
+|---|---|
+| `INTERNET` | Mengunduh komponen build dan dependensi, serta MCP |
+| `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `WAKE_LOCK` | Build tetap jalan saat layar mati |
+| `POST_NOTIFICATIONS` | Notifikasi progres dan hasil build (Android 13+) |
+| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Build panjang tidak dimatikan sistem; ditanyakan sekali dan Anda yang memutuskan |
+| `REQUEST_INSTALL_PACKAGES` | Membuka installer sistem untuk APK yang baru dibuild |
+| `MANAGE_EXTERNAL_STORAGE` | Folder `Studio Mobile/` di penyimpanan bersama (Android 11+). Di Android 8 dan 9 dipakai izin penyimpanan klasik |
+
 ---
 
 ## Keterbatasan
 
-- **Python, Dart, dan C/C++ hanya untuk arm64-v8a.** Tidak jalan di ARM 32-bit (armeabi-v7a), x86, dan x86_64 yang tidak bisa menjalankan kode arm64
+- **Python, Dart, Flutter, dan C/C++ hanya untuk arm64-v8a.** Tidak jalan di ARM 32-bit (armeabi-v7a), x86, dan x86_64 yang tidak bisa menjalankan kode arm64
 - **Build Gradle butuh HP ARM** (JDK hanya tersedia untuk arm64-v8a dan armeabi-v7a)
 - `compileSdk` / `targetSdk` di atas **API 37** tidak didukung
 - **Export AAB hanya untuk build lokal**, belum untuk project yang dibuild lewat Gradle
 - Satu APK per build: tanpa build variant dan product flavor kustom
-- Jetpack Compose dan annotation processor tidak didukung (menurut batas bawaan aplikasi)
+- Jetpack Compose tidak didukung. Annotation processor hanya untuk sumber Java; kapt (Kotlin) tidak tersedia di HP
 - Plugin Gradle sembarang hanya bisa lewat build engine Gradle; build lokal tidak menjalankannya
 - Manifest merging tidak mendukung `tools:node` dan `tools:replace`
-- Dart tanpa Flutter dan tanpa package pub; Python tidak dikemas ke APK
+- Dart tanpa package pub; Python tidak dikemas ke APK
+- **Flutter masih tahap awal**: hanya arm64-v8a, SDK dipasang dan dicek, tetapi **belum menghasilkan APK**
 - Tidak ada unit test atau instrumented test; hanya `assembleDebug`
-- Studio Mobile tidak membuat `MainActivity`, layout, atau kode contoh sendiri: project kosong tetap kosong
+- Wizard hanya membuat file awal minimal (satu `MainActivity` berisi satu `TextView`, manifest, `strings.xml`, `themes.xml`). Tidak ada layout XML atau kode contoh lain, dan project yang diimpor tidak diubah
+- Pemeriksaan risiko crash sebelum build hanya ada di **build lokal**
+- Wallpaper video maksimal **60 detik** dan 500 MB, hanya diputar di code editor
 - Kunci debug lokal dibuat otomatis dan **tidak boleh dipakai untuk rilis**; gunakan key sendiri
 - Komponen besar (NDK, JDK, Gradle, standard library Python) diunduh saat pertama dipakai dan butuh internet serta ruang penyimpanan
 - **Preview tidak menjalankan kode** Java/Kotlin: logika, jaringan, dan database tidak aktif; `ConstraintLayout` belum mendukung barrier, group, dan flow
@@ -992,7 +1106,7 @@ Butuh izin "All files access" (Android 11+) agar folder berada di penyimpanan be
 
 ## Build Studio Mobile sendiri
 
-Jalankan workflow **Build Studio Mobile APK** di GitHub Actions. Workflow ini mengunduh dan memverifikasi aapt2 (4 ABI), NDK clang (arm64), interpreter Python (arm64), Dart VM, dan Node.js (4 ABI), lalu mengemasnya ke `jniLibs`.
+Jalankan workflow **Build Studio Mobile APK** di GitHub Actions. Workflow ini mengunduh dan memverifikasi aapt2 (4 ABI), NDK clang (arm64), interpreter Python (arm64), Dart VM, Node.js (4 ABI), dan executable Flutter (`dart`, `gen_snapshot`, `impellerc`, arm64), lalu mengemasnya ke `jniLibs`. Workflow juga memeriksa arsip Flutter SDK terhadap hash di `tools/flutter-sdk.json`, mendaftarkan JDK dan Gradle ke katalog (`tools/gradle-jdk.json`), membuat transpiler JSX/TypeScript (Sucrase untuk QuickJS), menjalankan unit test, dan baru membuild APK debug. Laporan test ikut diunggah sebagai artifact.
 
 ## Lisensi
 
