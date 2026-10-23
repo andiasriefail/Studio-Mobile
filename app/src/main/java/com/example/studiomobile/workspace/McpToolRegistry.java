@@ -80,7 +80,7 @@ public final class McpToolRegistry {
 
     private void registerTools() {
         tools.add(new ToolSpec("get_studio_limits", "Studio Mobile limits",
-            "Returns what Studio Mobile can and cannot build (Java up to 21, Android up to 16 / API 36, supported Gradle features). Read this before changing build files.",
+            "Returns what Studio Mobile can and cannot build (Java up to " + McpLimits.JAVA_LEVEL + ", Android up to " + McpLimits.MAX_ANDROID_VERSION + " / API " + McpLimits.MAX_ANDROID_API + ", supported Gradle features). Read this before changing build files.",
             false, false, schema().build()));
 
         tools.add(new ToolSpec("get_toolchain_info", "Installed toolchain",

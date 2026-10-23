@@ -49,6 +49,9 @@ public final class McpLimits {
             .append("A declared level above ").append(JAVA_LEVEL)
             .append(" (sourceCompatibility, targetCompatibility, JavaVersion, jvmTarget, jvmToolchain) rejects the build, ")
             .append("and so does a local library in libs/ compiled for a newer Java.\n");
+        text.append("- Java ").append(JAVA_LEVEL).append(" features work, including module imports (import module java.base;): Studio Mobile rewrites them into ordinary imports ")
+            .append("(import package.*;) for the build, so plain imports and module imports can both be used. ")
+            .append("Android's android.jar is not a JDK: only packages that exist on Android can be imported.\n");
         text.append("- Android up to version ").append(MAX_ANDROID_VERSION).append(" (API ").append(MAX_ANDROID_API)
             .append("). compileSdk or targetSdk above ").append(MAX_ANDROID_API).append(" is not supported.\n");
         text.append("- Kotlin and Java sources are supported. Annotation processors, Jetpack Compose, custom build variants ")
@@ -197,7 +200,7 @@ public final class McpLimits {
                 if (level > MAX_ANDROID_API)
                     errors.add(fileName + " sets compileSdk " + level + ". Studio Mobile supports up to API " + MAX_ANDROID_API + " (Android " + MAX_ANDROID_VERSION + ").");
             } else if (COMPILE_SDK_ANY.matcher(source).find()) {
-                warnings.add(fileName + " sets compileSdk with a variable or expression. Studio Mobile only understands a plain number such as compileSdk = 36.");
+                warnings.add(fileName + " sets compileSdk with a variable or expression. Studio Mobile only understands a plain number such as compileSdk = " + MAX_ANDROID_API + ".");
             }
             Matcher target = TARGET_SDK.matcher(source);
             if (target.find()) {
