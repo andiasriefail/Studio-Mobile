@@ -144,27 +144,90 @@ public final class ProjectBuildService {
     /** Whole log of the current or most recent build. */
     public String getLog() { synchronized (lock) { return log.toString(); } }
 
+    /** The Build screen log without line wrapping (what Copy log copies). */
+    public String getDisplayLog() { return getDisplayLog(0); }
+
     /**
-     * The log for the Build screen, one line per step or detail: "[time since start] text  (how long it took)". The running step
+     * The log for the Build screen, one entry per step or detail: "[time since start] text  (how long it took)". The running step
      * shows its time so far. Steps keep their lines for the whole build, so the time of every earlier step stays visible.
+     *
+     * The text always starts in the same column, like a book or a code block. With [columns] greater than 0 a long entry is wrapped
+     * at that width and every following line starts under the first letter of the text, never under the time stamp. The duration
+     * stays at the end of the entry's last line.
      */
-    public String getDisplayLog() {
+    public String getDisplayLog(int columns) {
         synchronized (lock) {
             long now = System.currentTimeMillis();
             long start = startedAtMillis;
             long end = finishedAtMillis != 0 ? finishedAtMillis : now;
+            // Every time stamp is padded to the widest one (a build over an hour has "[1:00:00]"), so the text column never moves.
+            int stampWidth = 0;
+            for (Entry e : entries) if (e.stamped) stampWidth = Math.max(stampWidth, clock(e.at - start).length() + 2);
+            if (stampWidth == 0) stampWidth = 7;
+            String gutter = spaces(stampWidth + 1);
             StringBuilder out = new StringBuilder();
             for (int i = 0; i < entries.size(); i++) {
                 Entry e = entries.get(i);
                 if (out.length() > 0) out.append('\n');
-                if (!e.stamped) { out.append("         ").append(e.text); continue; }
-                out.append('[').append(clock(e.at - start)).append("] ");
-                if (e.kind == DETAIL) out.append("  ");
-                out.append(e.text);
-                if (e.kind != MESSAGE) out.append("  (").append(clock(nextStart(i, end) - e.at)).append(')');
+                String first;
+                if (e.stamped) {
+                    String stamp = "[" + clock(e.at - start) + "]";
+                    first = stamp + spaces(stampWidth + 1 - stamp.length());
+                } else first = gutter;
+                String duration = e.stamped && e.kind != MESSAGE ? "(" + clock(nextStart(i, end) - e.at) + ")" : "";
+                out.append(wrapEntry(first, gutter, e.kind == DETAIL ? "  " + e.text : e.text, duration, columns));
             }
             return out.toString();
         }
+    }
+
+    private static String spaces(int count) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < count; i++) out.append(' ');
+        return out.toString();
+    }
+
+    /**
+     * One entry as text. [first] starts the first line (the padded time stamp), [indent] starts every other line. Text that begins
+     * with spaces (details, stack traces) keeps that indentation on the lines it wraps into. Breaks happen at spaces; a word longer
+     * than the line is cut. The duration stays on the last line when it fits, otherwise it gets a line of its own under the text.
+     */
+    static String wrapEntry(String first, String indent, String text, String duration, int columns) {
+        String tail = duration.isEmpty() ? "" : "  " + duration;
+        int width = columns - indent.length();
+        if (columns <= 0 || width < 12) return first + text + tail;
+        int lead = 0;
+        while (lead < text.length() && text.charAt(lead) == ' ') lead++;
+        String carry = spaces(Math.min(lead, width / 2));
+        List<String> lines = new ArrayList<>();
+        String rest = text;
+        while (true) {
+            String prefix = lines.isEmpty() ? "" : carry;
+            int room = width - prefix.length();
+            if (rest.length() <= room) { lines.add(prefix + rest); break; }
+            int cut = rest.lastIndexOf(' ', room);
+            int skip;
+            if (cut <= (lines.isEmpty() ? lead : 0)) { cut = room; skip = room; }   // one long word: cut it
+            else {
+                skip = cut;
+                while (skip < rest.length() && rest.charAt(skip) == ' ') skip++;
+                while (cut > 0 && rest.charAt(cut - 1) == ' ') cut--;                // no trailing spaces
+            }
+            lines.add(prefix + rest.substring(0, cut));
+            rest = rest.substring(skip);
+            if (rest.isEmpty()) break;
+        }
+        if (!tail.isEmpty()) {
+            String last = lines.get(lines.size() - 1);
+            if (last.length() + tail.length() <= width) lines.set(lines.size() - 1, last + tail);
+            else lines.add(duration);
+        }
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < lines.size(); i++) {
+            if (i > 0) out.append('\n');
+            out.append(i == 0 ? first : indent).append(lines.get(i));
+        }
+        return out.toString();
     }
 
     /** A step lasts until the next step starts; a detail lasts until the next step or detail starts. Falls back to the end time. */
