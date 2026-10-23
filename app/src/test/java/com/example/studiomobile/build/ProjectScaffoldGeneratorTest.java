@@ -53,7 +53,7 @@ public class ProjectScaffoldGeneratorTest {
         assertTrue(JavaLanguageLevel.inspect(project).isValid());
         assertEquals("com.example.demo", BuildProjectFiles.readApplicationId(project, "x"));
         assertEquals("24", BuildProjectFiles.readNumericSdkValue(project, true, "0"));
-        assertEquals("36", BuildProjectFiles.readNumericSdkValue(project, false, "0"));
+        assertEquals(String.valueOf(LocalLibsInstaller.DEFAULT_API), BuildProjectFiles.readNumericSdkValue(project, false, "0"));
         GradleDependencyParser dependencies = GradleDependencyParser.parse(project, BuildProjectFiles.moduleDirectory(project));
         assertTrue(dependencies.declarations.isEmpty());
     }
