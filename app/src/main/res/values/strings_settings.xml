@@ -8,6 +8,9 @@
     <string name="wallpaper_title">Change Wallpaper</string>
     <string name="wallpaper_none">No wallpaper selected</string>
     <string name="wallpaper_choose">Choose image</string>
+    <string name="exit_confirm_message">Are you sure you want to exit?</string>
+    <string name="exit_confirm_no">No</string>
+    <string name="exit_confirm_yes_save">Yes and Save</string>
     <string name="wallpaper_choose_video">Choose video</string>
     <string name="wallpaper_video_title">Live wallpaper (video)</string>
     <string name="wallpaper_video_hint">Pick a video of up to 60 seconds. It plays muted and looping, only while you are in the code editor. It stops in Home, Preview and Build, and pauses when you leave the app.</string>
