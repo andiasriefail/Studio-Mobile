@@ -390,7 +390,9 @@ public final class ProjectBuildService {
             deleteRecursively(buildRoot);
             copyDirectory(project, buildRoot);
             com.example.studiomobile.build.BuildFailureReport.begin(readAppName(buildRoot, project.getName()));   // error log file is named after the app
-            if (new DebugModeSettings(appContext).isEnabled()) {
+            // A Flutter project (pubspec.yaml with the Flutter SDK dependency) has its own route; the Android crash catcher is not injected into it.
+            com.example.studiomobile.build.flutter.FlutterProjectDetector.Detection flutter = com.example.studiomobile.build.flutter.FlutterProjectDetector.detect(buildRoot);
+            if (!flutter.isFlutter() && new DebugModeSettings(appContext).isEnabled()) {
                 if (bundle) {
                     // Export AAB is for Google Play: the crash catcher must never be inside a bundle that is published. The saved Debug Mode choice is not changed.
                     appendShown("Debug Mode is off for Export AAB: the crash catcher is not added to the bundle.");
@@ -411,11 +413,13 @@ public final class ProjectBuildService {
             // Gradle only when the project really needs it (Android Studio project, extra plugins, ...); otherwise the local pipeline builds it.
             String gradleReason = hasBuildFiles ? com.example.studiomobile.build.GradleNeedDetector.reasonToUseGradle(buildRoot) : null;
             boolean useGradle = hasBuildFiles && gradleReason != null && hasGradleRuntime();
-            if (hasBuildFiles) appendInfo("[internal] Build route: " + (useGradle ? "Gradle (" + gradleReason + ")" : "local pipeline (no Gradle-only feature found)"));
-            BuildConfiguration configuration = new BuildConfiguration(buildRoot, apkOutput, !hasBuildFiles, bundle);
-            BuildPipeline pipeline = useGradle ? new GradleBuildPipeline(appContext) : new LocalBuildPipeline(appContext);
+            if (flutter.isFlutter()) appendInfo("[internal] Build route: Flutter (pubspec.yaml depends on the Flutter SDK)");
+            else if (hasBuildFiles) appendInfo("[internal] Build route: " + (useGradle ? "Gradle (" + gradleReason + ")" : "local pipeline (no Gradle-only feature found)"));
+            BuildConfiguration configuration = new BuildConfiguration(buildRoot, apkOutput, !hasBuildFiles && !flutter.isFlutter(), bundle);
+            BuildPipeline pipeline = flutter.isFlutter() ? new com.example.studiomobile.build.flutter.FlutterBuildPipeline(appContext)
+                : useGradle ? new GradleBuildPipeline(appContext) : new LocalBuildPipeline(appContext);
             activePipeline = pipeline;
-            failureStage = useGradle ? "GRADLE BUILD" : "LOCAL BUILD";
+            failureStage = flutter.isFlutter() ? "FLUTTER BUILD" : useGradle ? "GRADLE BUILD" : "LOCAL BUILD";
 
             BuildLogger logger = new BuildLogger() {
                 @Override public void onInfo(String message) { appendInfo(message); }
