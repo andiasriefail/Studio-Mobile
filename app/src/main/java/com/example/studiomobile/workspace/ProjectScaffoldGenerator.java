@@ -32,21 +32,34 @@ public final class ProjectScaffoldGenerator {
      * @return project-relative paths of the files that were created
      */
     public static List<String> generate(File projectDirectory, String projectName, String applicationLabel, String packageName) throws IOException {
+        return generate(projectDirectory, projectName, applicationLabel, packageName, null);
+    }
+
+    /**
+     * Same as above, plus launcher icon files chosen in the wizard. {@code iconFiles} maps project-relative paths
+     * (for example {@code app/src/main/res/mipmap-hdpi/ic_launcher.png}) to their bytes; see {@link LauncherIconFiles}.
+     * When it is not empty the manifest gets {@code android:icon} and {@code android:roundIcon}.
+     */
+    public static List<String> generate(File projectDirectory, String projectName, String applicationLabel, String packageName, Map<String, byte[]> iconFiles) throws IOException {
         if (projectDirectory == null || !projectDirectory.isDirectory()) throw new IllegalArgumentException("projectDirectory must be an existing directory");
         if (projectName == null || projectName.trim().isEmpty()) throw new IllegalArgumentException("projectName is required");
         if (packageName == null || !PACKAGE_NAME.matcher(packageName).matches()) throw new IllegalArgumentException("Invalid package name: " + packageName);
         String label = applicationLabel == null || applicationLabel.trim().isEmpty() ? projectName.trim() : applicationLabel.trim();
 
+        boolean withIcon = iconFiles != null && !iconFiles.isEmpty();
         Map<String, String> files = new LinkedHashMap<>();
         files.put("settings.gradle", settingsGradle(projectName.trim()));
         files.put("build.gradle", ROOT_BUILD_GRADLE);
         files.put("gradle/libs.versions.toml", VERSION_CATALOG);
         files.put("app/build.gradle", appBuildGradle(packageName));
         files.put("app/proguard-rules.pro", PROGUARD_RULES);
-        files.put("app/src/main/AndroidManifest.xml", manifest(packageName));
+        files.put("app/src/main/AndroidManifest.xml", manifest(packageName, withIcon));
         files.put("app/src/main/java/" + packageName.replace('.', '/') + "/MainActivity.java", mainActivity(packageName));
         files.put("app/src/main/res/values/strings.xml", strings(label));
         files.put("app/src/main/res/values/themes.xml", THEMES);
+
+        Map<String, byte[]> binaries = new LinkedHashMap<>();
+        if (withIcon) binaries.putAll(iconFiles);
 
         List<File> createdFiles = new ArrayList<>();
         List<File> createdDirectories = new ArrayList<>();
@@ -57,6 +70,14 @@ public final class ProjectScaffoldGenerator {
                 if (target.exists()) continue;
                 makeDirectories(target.getParentFile(), createdDirectories);
                 Files.write(target.toPath(), entry.getValue().getBytes(StandardCharsets.UTF_8));
+                createdFiles.add(target);
+                created.add(entry.getKey());
+            }
+            for (Map.Entry<String, byte[]> entry : binaries.entrySet()) {
+                File target = new File(projectDirectory, entry.getKey());
+                if (target.exists()) continue;
+                makeDirectories(target.getParentFile(), createdDirectories);
+                Files.write(target.toPath(), entry.getValue());
                 createdFiles.add(target);
                 created.add(entry.getKey());
             }
@@ -143,12 +164,14 @@ public final class ProjectScaffoldGenerator {
         + "# Keep readable stack traces (already on when using the default rules); mapping.txt is saved next to the APK:\n"
         + "#-keepattributes SourceFile,LineNumberTable\n";
 
-    private static String manifest(String packageName) {
+    private static String manifest(String packageName, boolean withIcon) {
         return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
             + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n\n"
             + "    <application\n"
             + "        android:allowBackup=\"true\"\n"
+            + (withIcon ? "        android:icon=\"@mipmap/ic_launcher\"\n" : "")
             + "        android:label=\"@string/app_name\"\n"
+            + (withIcon ? "        android:roundIcon=\"@mipmap/ic_launcher_round\"\n" : "")
             + "        android:theme=\"@style/Theme.App\">\n"
             + "        <activity\n"
             + "            android:name=\".MainActivity\"\n"

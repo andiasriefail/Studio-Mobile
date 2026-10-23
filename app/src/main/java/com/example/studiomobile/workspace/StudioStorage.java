@@ -19,6 +19,7 @@ import java.io.File;
  *   My Project/          every project
  *   My Application/      APKs saved with "Save APK"
  *   Export AAB/          App Bundles exported for Google Play
+ *   Icon Google Play Console/<project name>/   the 512x512 store icon of each project (ic_launcher-playstore.png)
  *   Local/local_libs/    downloaded libraries, reused by later builds
  *   Build Error Logs/    one build error log per app (<app name>-erors-logs.txt)
  * </pre>
@@ -33,6 +34,9 @@ public final class StudioStorage {
     public static final String APKS = "My Application";
     public static final String LOCAL_LIBS = "Local/local_libs";
     public static final String EXPORT_AAB = "Export AAB";
+    /** One sub-folder per project holding the 512x512 icon that Google Play Console asks for (it is not part of the APK). */
+    public static final String PLAY_ICONS = "Icon Google Play Console";
+    public static final String PLAY_ICON_FILE = "ic_launcher-playstore.png";
     public static final String ERROR_LOGS = "Build Error Logs";
     /** Crash and freeze reports of Studio Mobile itself. Kept apart from ERROR_LOGS, which only holds build error logs. */
     public static final String APP_CRASH_LOGS = "App Crash Logs";
@@ -70,13 +74,16 @@ public final class StudioStorage {
     public static File exportAabDir(Context context) { return dir(root(context), EXPORT_AAB); }
     /** The Studio Mobile folder itself, created when first needed. */
     public static File rootDir(Context context) { File root = root(context); if (!root.isDirectory()) root.mkdirs(); return root; }
+    public static File playIconsDir(Context context) { return dir(root(context), PLAY_ICONS); }
+    /** Studio Mobile/Icon Google Play Console/&lt;project name&gt;. Only a path: nothing is created. */
+    public static File playIconDir(Context context, String projectName) { return new File(playIconsDir(context), projectName); }
     public static File localLibsDir(Context context) { return dir(root(context), LOCAL_LIBS); }
     public static File errorLogsDir(Context context) { return dir(root(context), ERROR_LOGS); }
     public static File appCrashLogsDir(Context context) { return dir(root(context), APP_CRASH_LOGS); }
 
     /** Creates the whole folder layout. Safe to call repeatedly. */
     public static void ensureFolders(Context context) {
-        projectsDir(context); apkDir(context); exportAabDir(context); localLibsDir(context); errorLogsDir(context);
+        projectsDir(context); apkDir(context); exportAabDir(context); localLibsDir(context); errorLogsDir(context); playIconsDir(context);
     }
 
     private static File dir(File parent, String relative) {
