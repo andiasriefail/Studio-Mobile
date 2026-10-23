@@ -202,6 +202,56 @@ jobs:
           chmod 755 "$dest/libdartaotruntime.so" "$dest/libdartvm.so"
           file "$dest/libdartaotruntime.so" "$dest/libdartvm.so"
           python3 tools/pin_dart_catalog.py
+      - name: Cache the Flutter SDK archive
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/flutter-sdk-cache
+          key: flutter-sdk-${{ hashFiles('tools/flutter-sdk.json') }}
+      - name: Bundle the Flutter executables and pin the Flutter SDK
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The Flutter SDK archive is made and released by the "Flutter SDK slim release" workflow (tools/flutter-sdk.json names repo, tag, asset and hash).
+          field() { python3 -c "import json,sys; print(json.load(open('tools/flutter-sdk.json'))[sys.argv[1]])" "$1"; }
+          flutter_repo=$(field repo); tag=$(field tag); name=$(field asset); expected=$(field sha256)
+          cache="$RUNNER_TEMP/flutter-sdk-cache"
+          mkdir -p "$cache"
+          if [ -f "$cache/$name" ]; then
+            echo "Using the cached $name"
+          else
+            gh release download "$tag" --pattern "$name" --dir "$cache" --repo "$flutter_repo"
+          fi
+          # The checksum is verified every time, so a damaged or outdated cache entry can never be used.
+          sum=$(sha256sum "$cache/$name" | cut -d' ' -f1)
+          [ "$sum" = "$expected" ] || { rm -f "$cache/$name"; echo "SHA-256 mismatch for $name from $flutter_repo: $sum (tools/flutter-sdk.json expects $expected)" >&2; exit 1; }
+          # Android 10+ only runs executables from the native library directory, so these three leave the archive and ship inside the APK.
+          dest=app/src/main/jniLibs/arm64-v8a
+          mkdir -p "$dest"
+          python3 - "$cache/$name" "$dest" <<'PY'
+          import posixpath, shutil, sys, tarfile
+          archive, dest = sys.argv[1], sys.argv[2]
+          wanted = {
+              "flutter/bin/cache/dart-sdk/bin/dart": "libflutterdart.so",
+              "flutter/bin/cache/artifacts/engine/linux-arm64/gen_snapshot": "libgensnapshot.so",
+              "flutter/bin/cache/artifacts/engine/linux-arm64/impellerc": "libimpellerc.so",
+          }
+          with tarfile.open(archive, "r:xz") as tar:
+              members = {m.name: m for m in tar.getmembers()}
+              for name, out in wanted.items():
+                  member, hops = members.get(name), 0
+                  while member is not None and member.issym() and hops < 8:
+                      member = members.get(posixpath.normpath(posixpath.join(posixpath.dirname(member.name), member.linkname)))
+                      hops += 1
+                  if member is None or not member.isfile():
+                      sys.exit("Not a regular file in the archive: " + name)
+                  with tar.extractfile(member) as source, open(dest + "/" + out, "wb") as target:
+                      shutil.copyfileobj(source, target)
+                  print("extracted", name, "->", out, member.size, "bytes")
+          PY
+          chmod 755 "$dest/libflutterdart.so" "$dest/libgensnapshot.so" "$dest/libimpellerc.so"
+          file "$dest/libflutterdart.so" "$dest/libgensnapshot.so" "$dest/libimpellerc.so"
+          python3 tools/pin_flutter_catalog.py
       - name: Resolve the JDKs and Gradle distributions (tools/gradle-jdk.json) and register them in the catalog
         env:
           GH_TOKEN: ${{ github.token }}
