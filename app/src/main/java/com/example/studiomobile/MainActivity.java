@@ -51,6 +51,8 @@ import com.example.studiomobile.build.dependency.ChecksumFailure;
 import com.example.studiomobile.build.stages.ApkSigningStage;
 import com.example.studiomobile.workspace.AbortController;
 import com.example.studiomobile.workspace.DebugModeSettings;
+import com.example.studiomobile.workspace.LauncherIconFiles;
+import com.example.studiomobile.workspace.ProjectIconLoader;
 import com.example.studiomobile.workspace.McpRelayClient;
 import com.example.studiomobile.workspace.McpRelayService;
 import com.example.studiomobile.workspace.McpRelayUrl;
@@ -150,6 +152,7 @@ public class MainActivity extends AppCompatActivity {
     // Create wizard
     private int wizardStep, versionCode = 1, minSdk = 23, targetSdk = 35;
     private Bitmap iconBitmap;
+    private final int[] iconSizes = LauncherIconFiles.DEFAULT_SIZES.clone();   // px for mdpi, hdpi, xhdpi, xxhdpi
 
     // Preview
     private int previewToken;
@@ -431,8 +434,8 @@ public class MainActivity extends AppCompatActivity {
 
     /** Everything the project list needs from disk, read off the UI thread (shared storage can be very slow while a build is writing). */
     private static final class ProjectRow {
-        final File dir; final String title; final String subtitle; final String sdk; final long modified;
-        ProjectRow(File dir, String title, String subtitle, String sdk, long modified) { this.dir = dir; this.title = title; this.subtitle = subtitle; this.sdk = sdk; this.modified = modified; }
+        final File dir; final String title; final String subtitle; final String sdk; final long modified; final Bitmap icon;
+        ProjectRow(File dir, String title, String subtitle, String sdk, long modified, Bitmap icon) { this.dir = dir; this.title = title; this.subtitle = subtitle; this.sdk = sdk; this.modified = modified; this.icon = icon; }
     }
 
     private final ExecutorService projectsExecutor = Executors.newSingleThreadExecutor();
@@ -455,7 +458,8 @@ public class MainActivity extends AppCompatActivity {
                     if (dirs != null) for (File dir : dirs) {
                         ProjectLabels.Line line = ProjectLabels.describe(dir);   // title + second line, see ProjectLabels
                         rows.add(new ProjectRow(dir, line.getTitle(), line.getSubtitle(), LanguageUi.sdkRange(
-                            BuildProjectFiles.readNumericSdkValue(dir, true, "?"), BuildProjectFiles.readNumericSdkValue(dir, false, "?")), dir.lastModified()));
+                            BuildProjectFiles.readNumericSdkValue(dir, true, "?"), BuildProjectFiles.readNumericSdkValue(dir, false, "?")), dir.lastModified(),
+                            ProjectIconLoader.load(dir, dp(64))));   // the app's own launcher icon (res/mipmap, res/drawable); null keeps the letters
                     }
                     Collections.sort(rows, (a, b) -> Long.compare(b.modified, a.modified));
                 } catch (RuntimeException unreadable) { /* show what was read so far */ }
@@ -482,6 +486,7 @@ public class MainActivity extends AppCompatActivity {
             TextView initials = item.findViewById(R.id.project_initials);
             initials.setText(initialsOf(row.title));
             initials.setTextColor(color(avatarInk[i % 3]));
+            showAvatarIcon((FrameLayout) item.findViewById(R.id.project_avatar), initials, row.icon, 22);
             ((TextView) item.findViewById(R.id.project_name)).setText(row.title);
             TextView second = item.findViewById(R.id.project_package);
             second.setText(row.subtitle);
@@ -494,7 +499,7 @@ public class MainActivity extends AppCompatActivity {
                 new SheetAction(LanguageUi.EXPORT_AAB, R.drawable.ic_upload, false, () -> aabUi.start(project)),
                 new SheetAction(LanguageUi.EXPORT_ZIP, R.drawable.ic_import_zip, false, () -> zipUi.exportZip(project)),
                 new SheetAction(getString(R.string.rename), R.drawable.ic_edit, false, () -> renameProject(project)),
-                new SheetAction(getString(R.string.delete), R.drawable.ic_delete, true, () -> confirmDelete(project, () -> { new ProjectKeys(getFilesDir()).clear(project.getName()); refreshProjects(); })))));
+                new SheetAction(getString(R.string.delete), R.drawable.ic_delete, true, () -> confirmDelete(project, () -> { new ProjectKeys(getFilesDir()).clear(project.getName()); syncPlayIconFolder(project.getName(), null); refreshProjects(); })))));
             list.addView(item);
         }
     }
@@ -503,6 +508,28 @@ public class MainActivity extends AppCompatActivity {
         String letters = name.replaceAll("[^A-Za-z0-9]", "");
         if (letters.isEmpty()) return "?";
         return letters.substring(0, Math.min(2, letters.length())).toUpperCase(Locale.ROOT);
+    }
+
+    /**
+     * Shows the app's icon in an avatar frame instead of the letters. The letters stay as the default: with no icon (null) the
+     * frame is left exactly as it was. Rounded with [radiusDp] so the picture follows the shape of the frame.
+     */
+    private void showAvatarIcon(FrameLayout frame, TextView letters, Bitmap icon, float radiusDp) {
+        ImageView old = frame.findViewWithTag("app_icon");
+        if (old != null) frame.removeView(old);
+        if (icon == null) { letters.setVisibility(View.VISIBLE); return; }
+        ImageView image = new ImageView(this);
+        image.setTag("app_icon");
+        image.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        image.setImageBitmap(icon);
+        image.setContentDescription(null);
+        final float radius = dp(radiusDp);
+        image.setOutlineProvider(new android.view.ViewOutlineProvider() {
+            @Override public void getOutline(View view, android.graphics.Outline outline) { outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius); }
+        });
+        image.setClipToOutline(true);
+        frame.addView(image, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        letters.setVisibility(View.GONE);
     }
 
     private String projectPackage(File project) {
@@ -571,7 +598,7 @@ public class MainActivity extends AppCompatActivity {
             if (!validName(value)) { toast(LanguageUi.ENTER_VALID_NAME); return; }
             File target = new File(projectsDir(), value);
             if (target.exists()) { toast(LanguageUi.PROJECT_EXISTS); return; }
-            if (project.renameTo(target)) { new ProjectKeys(getFilesDir()).rename(project.getName(), value); toast(LanguageUi.RENAMED); refreshProjects(); } else toast(LanguageUi.RENAME_FAILED);
+            if (project.renameTo(target)) { new ProjectKeys(getFilesDir()).rename(project.getName(), value); syncPlayIconFolder(project.getName(), value); toast(LanguageUi.RENAMED); refreshProjects(); } else toast(LanguageUi.RENAME_FAILED);
         });
     }
 
@@ -624,12 +651,20 @@ public class MainActivity extends AppCompatActivity {
 
     private void showCreate() {
         wizardStep = 0; versionCode = 1; minSdk = 23; targetSdk = 35; iconBitmap = null;
+        System.arraycopy(LauncherIconFiles.DEFAULT_SIZES, 0, iconSizes, 0, iconSizes.length);
         show(Screen.CREATE, R.layout.screen_create, true, R.color.cosmic_white);
         click(R.id.wizard_back_icon, this::goBack);
         click(R.id.btn_back, this::goBack);
         click(R.id.btn_next, this::wizardNext);
         click(R.id.btn_create, this::createProject);
         click(R.id.btn_choose_icon, () -> pickIcon.launch(new String[]{"image/*"}));
+        int[] iconMinus = {R.id.icon_size_minus_1, R.id.icon_size_minus_2, R.id.icon_size_minus_3, R.id.icon_size_minus_4};
+        int[] iconPlus = {R.id.icon_size_plus_1, R.id.icon_size_plus_2, R.id.icon_size_plus_3, R.id.icon_size_plus_4};
+        for (int i = 0; i < iconSizes.length; i++) {
+            final int index = i;
+            click(iconMinus[i], () -> { iconSizes[index] = Math.max(LauncherIconFiles.MIN_SIZE, iconSizes[index] - LauncherIconFiles.STEP); refreshWizard(); });
+            click(iconPlus[i], () -> { iconSizes[index] = Math.min(LauncherIconFiles.MAX_SIZE, iconSizes[index] + LauncherIconFiles.STEP); refreshWizard(); });
+        }
         click(R.id.version_code_minus, () -> { if (versionCode > 1) versionCode--; refreshWizard(); });
         click(R.id.version_code_plus, () -> { if (versionCode < 2100000000) versionCode++; refreshWizard(); });
         click(R.id.min_sdk_minus, () -> { if (minSdk > MIN_SDK_LOWEST) minSdk--; refreshWizard(); });
@@ -663,6 +698,8 @@ public class MainActivity extends AppCompatActivity {
         screenView.findViewById(R.id.btn_back).setVisibility(wizardStep == 0 ? View.GONE : View.VISIBLE);
         screenView.findViewById(R.id.btn_next).setVisibility(wizardStep < 3 ? View.VISIBLE : View.GONE);
         screenView.findViewById(R.id.btn_create).setVisibility(wizardStep == 3 ? View.VISIBLE : View.GONE);
+        int[] iconTexts = {R.id.icon_size_text_1, R.id.icon_size_text_2, R.id.icon_size_text_3, R.id.icon_size_text_4};
+        for (int i = 0; i < iconSizes.length; i++) ((TextView) screenView.findViewById(iconTexts[i])).setText(iconSizes[i] + " px");
         ((TextView) screenView.findViewById(R.id.version_code_text)).setText(String.valueOf(versionCode));
         ((TextView) screenView.findViewById(R.id.min_sdk_text)).setText(LanguageUi.sdkLabel(minSdk));
         ((TextView) screenView.findViewById(R.id.target_sdk_text)).setText(LanguageUi.sdkLabel(targetSdk));
@@ -721,6 +758,30 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    /**
+     * Studio Mobile/Icon Google Play Console/&lt;project name&gt;/ic_launcher-playstore.png (512 x 512). The project's folder is always made;
+     * without a chosen icon it stays empty. Any failure here is ignored so the project and its build are not affected.
+     */
+    private void writePlayStoreIcon(String projectName, Bitmap icon) {
+        try {
+            File folder = StudioStorage.playIconDir(this, projectName);
+            if (!folder.isDirectory() && !folder.mkdirs()) return;
+            byte[] png = icon == null ? null : LauncherIconFiles.playStoreIcon(icon);
+            if (png != null) java.nio.file.Files.write(new File(folder, StudioStorage.PLAY_ICON_FILE).toPath(), png);
+        } catch (Exception | OutOfMemoryError ignored) { }
+    }
+
+    /** Keeps the store-icon folder in step when a project is renamed ([to] null: it was deleted). */
+    private void syncPlayIconFolder(String from, String to) {
+        try {
+            File old = StudioStorage.playIconDir(this, from);
+            if (!old.isDirectory()) return;
+            if (to == null) { deleteRecursively(old); return; }
+            File target = StudioStorage.playIconDir(this, to);
+            if (!target.exists()) old.renameTo(target);
+        } catch (Exception ignored) { }
+    }
+
     /** Creates the project folder and writes the starter Gradle, manifest, resource and source files. */
     private void createProject() {
         final String name = text(R.id.input_project), pkg = wizardPackage();
@@ -729,10 +790,14 @@ public class MainActivity extends AppCompatActivity {
         final File dir = new File(projectsDir(), name);
         if (dir.exists()) { toast(LanguageUi.PROJECT_EXISTS); return; }
         final String label = wizardAppName();
+        final Bitmap chosenIcon = iconBitmap;
+        final int[] chosenSizes = iconSizes.clone();
         io.execute(() -> {
             if (!dir.mkdirs()) { runOnUiThread(() -> toast(LanguageUi.CREATE_FAILED + "could not create the project folder")); return; }
             try {
-                ProjectScaffoldGenerator.generate(dir, name, label, pkg);
+                // the chosen picture becomes real resource files (mipmap-*/ic_launcher.png ...) and the manifest points to them
+                ProjectScaffoldGenerator.generate(dir, name, label, pkg, chosenIcon == null ? null : LauncherIconFiles.build(chosenIcon, chosenSizes));
+                writePlayStoreIcon(name, chosenIcon);   // never stops the project from being created
                 runOnUiThread(() -> { toast(LanguageUi.PROJECT_CREATED); openProject(dir); });
             } catch (IOException | RuntimeException error) {
                 dir.delete();
@@ -790,12 +855,36 @@ public class MainActivity extends AppCompatActivity {
         icon.setImageTintList(ColorStateList.valueOf(on ? 0xFFD32F2F : ContextCompat.getColor(this, R.color.cosmic_primary_dark)));
     }
 
+    /**
+     * Fills the drawer header with the same logic as the Home project list (ProjectLabels.describe): title = project name (application name
+     * when the project has no name), second line = application name, else package name, else hidden. The icon is the app's own launcher icon;
+     * the letters stay if there is none. Disk reads run off the UI thread.
+     */
+    private void loadDrawerHeader(final File project) {
+        final int size = dp(40) * 2;
+        io.execute(() -> {
+            final ProjectLabels.Line line = ProjectLabels.describe(project);
+            final Bitmap icon = ProjectIconLoader.load(project, size);
+            runOnUiThread(() -> {
+                if (isFinishing() || screen != Screen.EDITOR || screenView == null || currentProject != project) return;
+                ((TextView) screenView.findViewById(R.id.drawer_name)).setText(line.getTitle());
+                TextView second = screenView.findViewById(R.id.drawer_package);
+                second.setText(line.getSubtitle());
+                second.setVisibility(line.getSubtitle().isEmpty() ? View.GONE : View.VISIBLE);
+                TextView letters = screenView.findViewById(R.id.drawer_initials);
+                letters.setText(initialsOf(line.getTitle()));
+                if (letters.getParent() instanceof FrameLayout) showAvatarIcon((FrameLayout) letters.getParent(), letters, icon, 20);
+            });
+        });
+    }
+
     private void showEditor() {
         if (currentProject == null) { showHome(); return; }
         show(Screen.EDITOR, R.layout.screen_editor, false, R.color.night_bg);
         ((TextView) screenView.findViewById(R.id.drawer_name)).setText(currentProject.getName());
-        ((TextView) screenView.findViewById(R.id.drawer_package)).setText(projectPackage(currentProject));
+        screenView.findViewById(R.id.drawer_package).setVisibility(View.GONE);   // filled by loadDrawerHeader, same rules as Home
         ((TextView) screenView.findViewById(R.id.drawer_initials)).setText(initialsOf(currentProject.getName()));
+        loadDrawerHeader(currentProject);
         codeEditor = screenView.findViewById(R.id.code_editor);
         codeGutter = screenView.findViewById(R.id.code_gutter);
         wallpaperUi.applyToEditor();
