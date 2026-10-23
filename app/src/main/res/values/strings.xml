@@ -4,6 +4,7 @@
     <string name="home_subtitle">Code Android apps on the go</string>
     <string name="home_create">Create Project</string>
     <string name="home_import_zip">Import Zip</string>
+    <string name="home_github"><u>Create an App with Github Url Repo</u></string>
     <string name="home_import_folder">Import Folder</string>
     <string name="home_recent">Recent projects</string>
 
