@@ -19,15 +19,15 @@ public final class BuildFailureReport {
     /** Name of the app being built; set once per build so every failure report goes to its own file. */
     private static volatile String currentApp = "";
 
-    /** Call when a build starts. The error log is then saved as {@code <app name>-erors-logs.txt}. */
+    /** Call when a build starts. The error log is then saved as {@code <app name>-error-logs.txt}. */
     public static void begin(String appName) { currentApp = appName == null ? "" : appName; }
 
-    /** @return {@code <app name>-erors-logs.txt}, with characters that are not allowed in file names replaced. */
+    /** @return {@code <app name>-error-logs.txt}, with characters that are not allowed in file names replaced. */
     static String fileNameFor(String appName) {
         String cleaned = appName == null ? "" : appName.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
         if (cleaned.isEmpty() || cleaned.equals(".") || cleaned.equals("..")) cleaned = "build";
         if (cleaned.length() > 100) cleaned = cleaned.substring(0, 100);
-        return cleaned + "-erors-logs.txt";
+        return cleaned + "-error-logs.txt";
     }
 
     public static File write(File outputDirectory, String stage, Throwable failure, String detail) {
