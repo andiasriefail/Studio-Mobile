@@ -21,7 +21,7 @@ import java.io.File;
  *   Export AAB/          App Bundles exported for Google Play
  *   Icon Google Play Console/<project name>/   the 512x512 store icon of each project (ic_launcher-playstore.png)
  *   Local/local_libs/    downloaded libraries, reused by later builds
- *   Build Error Logs/    one build error log per app (<app name>-erors-logs.txt)
+ *   Build Error Logs/    one build error log per app (<app name>-error-logs.txt)
  * </pre>
  *
  * Shared storage needs "All files access" (Android 11+) or the storage permission (Android 8-9). Until it is granted, and on

@@ -419,7 +419,7 @@ public final class ProjectBuildService {
         }
     }
 
-    /** Writes the full log of a failed build to Studio Mobile/Build Error Logs (one file per app: <app name>-erors-logs.txt). Never throws. */
+    /** Writes the full log of a failed build to Studio Mobile/Build Error Logs (one file per app: <app name>-error-logs.txt). Never throws. */
     private void saveFailureReport(String stage, Throwable crash) {
         try {
             String detail = lastMessage == null || lastMessage.isEmpty() ? "Build failed." : lastMessage;
