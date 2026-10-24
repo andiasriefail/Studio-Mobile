@@ -14,7 +14,7 @@ import java.util.regex.Pattern;
  *
  * Accepted file names in local_libs/:
  *   android.jar | android-37.jar | platform-37.0_r02.zip   (API level = first number after "android-" / "platform-", default DEFAULT_API)
- *   kotlin-stdlib-2.4.20.jar (any kotlin-stdlib*.jar, not -sources/-common/-jdk*)
+ *   kotlin-stdlib-2.4.21.jar (any kotlin-stdlib*.jar, not -sources/-common/-jdk*)
  * Already installed files are left alone (a bundled file is only copied if the destination is missing).
  */
 public final class LocalLibsInstaller {

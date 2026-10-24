@@ -48,7 +48,7 @@ public final class ToolchainImporter {
             requireEntries(jar, "kotlin-stdlib.jar", "kotlin/Unit.class", "META-INF/MANIFEST.MF");
             String version = readImplementationVersion(jar);
             String note = "Kotlin standard library imported" + (version == null ? "." : " (version " + version + ").")
-                + " Keep it equal to the bundled Kotlin compiler version (2.4.20) to avoid metadata errors.";
+                + " Keep it equal to the bundled Kotlin compiler version (2.4.21) to avoid metadata errors.";
             return install(jar, new File(toolRoot, "kotlin-stdlib.jar"), note);
         } finally { jar.delete(); }
     }

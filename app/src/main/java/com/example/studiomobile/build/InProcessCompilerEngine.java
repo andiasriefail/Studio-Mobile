@@ -288,7 +288,7 @@ public final class InProcessCompilerEngine {
         kotlinHome.mkdirs();
         args.add("-kotlin-home"); args.add(kotlinHome.getAbsolutePath());
         args.add("-jvm-target"); args.add(JavaLanguageLevel.flag(javaLevel));
-        // Kotlin 2.4.20 compiles `when` with several `is` checks to invokedynamic (SwitchBootstraps.typeSwitch) at JVM 21+, which Android does not have.
+        // Kotlin 2.4.x (checked with 2.4.21) compiles `when` with several `is` checks to invokedynamic (SwitchBootstraps.typeSwitch) at JVM 21+, which Android does not have.
         // Keep the classic instanceof chain so the DEX never depends on it.
         args.add("-Xwhen-expressions=inline");
         args.add("-classpath"); args.add(joinClasspath(classpathEntries));
