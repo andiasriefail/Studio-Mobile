@@ -32,7 +32,17 @@ public final class AndroidSdkLayout {
     private static final Pattern NEEDS_TOOLS = Pattern.compile("build-tools;(\\d+)(?:\\.(\\d+))?(?:\\.(\\d+))?");
     /** AGP's wording when a registered build-tools folder lacks files: "Installed Build Tools revision 36.0.0 is corrupted" / "Build-tool 36.0.0 is missing AAPT at ...". */
     private static final Pattern NEEDS_TOOLS_REPAIR = Pattern.compile("(?:Build Tools revision|Build-tool) (\\d+)\\.(\\d+)\\.(\\d+) is (?:corrupted|missing)");
+    /** AGP's wording when the default build-tools folder is absent and it cannot download one: "Failed to find Build Tools revision 36.0.0". */
+    private static final Pattern NEEDS_TOOLS_FIND = Pattern.compile("Failed to find Build Tools revision (\\d+)\\.(\\d+)\\.(\\d+)");
     private static final Pattern TOOLS_VERSION = Pattern.compile("(\\d+)\\.(\\d+)\\.(\\d+)");
+    /** A build-tools revision the project pins itself: buildToolsVersion "33.0.2" / buildToolsVersion = '34.0.0'. */
+    private static final Pattern PINNED_TOOLS = Pattern.compile("buildToolsVersion\\s*=?\\s*[\"'](\\d+)\\.(\\d+)\\.(\\d+)[\"']");
+    /**
+     * Build-tools revisions registered before the first Gradle run. AGP asks for its own default (36.0.0 for AGP 9.x, 35.0.0 for 8.8 to 8.13,
+     * 34.0.0 for 8.7, 30.0.3 for 7.x) and the project's Gradle files rarely name it, so it cannot be read from them. The folders only hold
+     * placeholders (the device's native tools are used), so registering a wide range costs almost nothing.
+     */
+    private static final String[] PREREGISTERED_TOOLS = {"37.0.0", "36.0.0", "35.0.0", "34.0.0", "33.0.1", "32.0.0", "31.0.0", "30.0.3"};
     /**
      * Files AGP's build-tools check looks for. Only their presence is tested: aapt2 comes from android.aapt2FromMavenOverride and D8/R8
      * from Maven, so these are placeholders. The list is the full set of a real build-tools package, so no revision is reported missing a file.
@@ -80,6 +90,7 @@ public final class AndroidSdkLayout {
             }
         }
         repairRegisteredBuildTools(sdk, logger);
+        preregisterBuildTools(sdk, project, logger);
         int requested = project == null ? 0 : readCompileSdk(project);
         if (requested > 0) providePlatform(sdk, requested, logger);
         File[] exposed = new File(sdk, "platforms").listFiles();
@@ -109,7 +120,7 @@ public final class AndroidSdkLayout {
             if (seenTargets.add(api + minor) && providePlatform(sdk, api, minor, logger)) provided++;
         }
         java.util.Set<String> seenTools = new java.util.HashSet<>();
-        for (Pattern pattern : new Pattern[] {NEEDS_TOOLS, NEEDS_TOOLS_REPAIR}) {
+        for (Pattern pattern : new Pattern[] {NEEDS_TOOLS, NEEDS_TOOLS_REPAIR, NEEDS_TOOLS_FIND}) {
             Matcher tools = pattern.matcher(gradleOutput);
             while (tools.find()) {
                 int major = Integer.parseInt(tools.group(1));
@@ -119,6 +130,34 @@ public final class AndroidSdkLayout {
             }
         }
         return provided;
+    }
+
+    /** Registers the usual build-tools revisions and the one the project pins, so the first build does not stop on a missing revision. */
+    private static void preregisterBuildTools(File sdk, File project, BuildLogger logger) {
+        java.util.Set<String> versions = new java.util.LinkedHashSet<>(java.util.Arrays.asList(PREREGISTERED_TOOLS));
+        String pinned = project == null ? null : readPinnedBuildTools(project);
+        if (pinned != null) versions.add(pinned);
+        int registered = 0;
+        for (String version : versions) {
+            Matcher parts = TOOLS_VERSION.matcher(version);
+            if (!parts.matches()) continue;
+            if (provideBuildTools(sdk, Integer.parseInt(parts.group(1)), Integer.parseInt(parts.group(2)), Integer.parseInt(parts.group(3)), logger)) registered++;
+        }
+        if (registered > 0) logger.onInfo("Build-tools registered before the build: " + registered + " revision(s).");
+    }
+
+    /** The buildToolsVersion a project names in its Gradle scripts, or null. */
+    static String readPinnedBuildTools(File project) {
+        String[] scripts = {"app/build.gradle", "app/build.gradle.kts", "build.gradle", "build.gradle.kts"};
+        for (String script : scripts) {
+            File file = new File(project, script);
+            if (!file.isFile() || file.length() > 1024 * 1024) continue;
+            try {
+                Matcher pinned = PINNED_TOOLS.matcher(new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+                if (pinned.find()) return pinned.group(1) + "." + pinned.group(2) + "." + pinned.group(3);
+            } catch (Exception ignored) { /* try the next script */ }
+        }
+        return null;
     }
 
     /** True when platforms/android-<api> is usable afterwards. */
