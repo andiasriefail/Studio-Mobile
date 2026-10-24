@@ -582,7 +582,7 @@ Hanya tahap AAPT2 (compile dan link) yang berjalan, tanpa Java, DEX, atau tanda 
 
 Widget yang tidak bisa di-inflate langsung diganti versi preview yang membaca atribut `app:` dan `tools:`:
 
-- `ConstraintLayout`: anchor parent/sibling/guideline, bias, rasio dimensi, chain. Belum ada: barrier, group, flow, posisi melingkar
+- `ConstraintLayout`: anchor parent/sibling/guideline, bias, rasio dimensi, chain, barrier, group, flow (versi sederhana: wrapMode none/chain/aligned, orientation, gap, maxElementsWrap, style, bias). Belum ada: flow_horizontalAlign/verticalAlign, posisi melingkar
 - `RecyclerView`, `ListView`, `GridView`, `ViewPager` (isi contoh dari `tools:listitem`)
 - `TabLayout`, `BottomNavigationView`, `FloatingActionButton`, `TextInputLayout`, `Chip`, `DrawerLayout`, `AppBarLayout`
 - `MaterialButton`, `CardView`, `MaterialCardView`, serta `srcCompat` dan tint
