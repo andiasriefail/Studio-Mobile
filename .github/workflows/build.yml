@@ -313,18 +313,10 @@ jobs:
               exit 1
             fi
           done
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: studio-mobile-test-reports
-          path: app/build/reports/tests/
-          if-no-files-found: ignore
-          retention-days: 1
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
-          name: studio-mobile-debug-apk
+          name: Studio Mobile
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
