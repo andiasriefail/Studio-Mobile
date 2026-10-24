@@ -122,7 +122,11 @@ public final class GradleRuntime {
         if (toolchainScript.isFile()) { args.add("-I"); args.add(toolchainScript.getAbsolutePath()); }
         args.add("-Dorg.gradle.java.home=" + javaHome.getAbsolutePath());
         // AGP normally downloads a Linux/x86-64 aapt2 from Maven, which cannot run on Android/ARM.
-        if (aapt2Override != null) args.add("-Pandroid.aapt2FromMavenOverride=" + aapt2Override.getAbsolutePath());
+        if (aapt2Override != null) {
+            args.add("-Pandroid.aapt2FromMavenOverride=" + aapt2Override.getAbsolutePath());
+            // AGP calls this option experimental and prints the app's private path for it on every build; the notice is not actionable here.
+            args.add("-Pandroid.sync.suppressAgpWarnings=UNSUPPORTED_PROJECT_OPTION_USE");
+        }
         if (offline) args.add("--offline");
         return args;
     }
