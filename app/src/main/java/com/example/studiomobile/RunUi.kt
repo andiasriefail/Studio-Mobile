@@ -17,12 +17,14 @@ import com.example.studiomobile.python.PythonProvisioner
 import com.example.studiomobile.python.PythonRuntime
 import com.example.studiomobile.python.PythonScriptRunner
 import com.example.studiomobile.script.JavaScriptRunner
+import com.example.studiomobile.shell.ShellRuntime
+import com.example.studiomobile.shell.ShellScriptRunner
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.io.File
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicReference
 
-/** The "Run with ..." actions of the file menu: JavaScript, Dart, Python, Java and Kotlin, with a live output window and a Stop button. */
+/** The "Run with ..." actions of the file menu: JavaScript, Dart, Python, Shell, Java and Kotlin, with a live output window and a Stop button. */
 class RunUi(private val host: MainActivity) {
     private val scriptExecutor = Executors.newSingleThreadExecutor()
     private val javaExecutor = Executors.newSingleThreadExecutor()
@@ -171,6 +173,29 @@ class RunUi(private val host: MainActivity) {
                 logger.onInfo(finished(runner.run(file, 120, logger), "\n[timed out after 120 s]"))
             } catch (error: Exception) {
                 logger.onError("Could not run Python: $error", error)
+            } finally {
+                ticket.release()
+            }
+        }
+    }
+
+    /** Runs a .sh file with the phone's own shell (/system/bin/sh) and shows its output live. Works on every ABI; nothing is downloaded. */
+    fun runShell(file: File) {
+        if (unsaved(file)) return
+        val ticket = beginRun() ?: return
+        val runner = AtomicReference<ShellScriptRunner?>()
+        val logger = openConsole(ticket, file.name) { runner.get()?.cancel() }.logger
+        scriptExecutor.execute {
+            try {
+                val problems = ArrayList<String>()
+                val runtime = ShellRuntime.locate(problems)
+                if (runtime == null) { for (problem in problems) logger.onError(problem, null); return@execute }
+                val shellRunner = ShellScriptRunner(runtime, File(host.filesDir, "shell-home"), host.cacheDir)
+                runner.set(shellRunner)
+                logger.onInfo("$ sh " + file.name)
+                logger.onInfo(finished(shellRunner.run(file, 120, logger), "\n[timed out after 120 s]"))
+            } catch (error: Exception) {
+                logger.onError("Could not run the shell script: $error", error)
             } finally {
                 ticket.release()
             }

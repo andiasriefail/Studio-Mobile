@@ -115,6 +115,7 @@ public class MainActivity extends AppCompatActivity {
     private static final Pattern LUA_COMMENT = Pattern.compile("--\\[\\[.*?\\]\\]|--[^\\n]*", Pattern.DOTALL);
     private static final Pattern DART_KEYWORDS = Pattern.compile("\\b(abstract|as|assert|async|await|break|case|catch|class|const|continue|covariant|default|deferred|do|dynamic|else|enum|export|extends|extension|external|factory|false|final|finally|for|Function|get|hide|if|implements|import|in|interface|is|late|library|mixin|new|null|of|on|operator|part|required|rethrow|return|sealed|set|show|static|super|switch|sync|this|throw|true|try|typedef|var|void|when|while|with|yield|int|double|String|bool|num|List|Map|Set|Future|Stream|print|main)\\b");
     private static final Pattern PY_KEYWORDS = Pattern.compile("\\b(and|as|assert|async|await|break|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|nonlocal|not|or|pass|raise|return|try|while|with|yield|None|True|False|self|print|match|case)\\b");
+    private static final Pattern SH_KEYWORDS = Pattern.compile("\\b(if|then|else|elif|fi|for|while|until|do|done|case|esac|in|function|select|return|exit|break|continue|local|export|readonly|unset|shift|set|source|echo|printf|cd|test|trap|eval|exec|read)\\b");
     private static final Pattern CMAKE_KEYWORDS = Pattern.compile("\\b(?i:cmake_minimum_required|project|add_library|add_executable|target_link_libraries|target_include_directories|target_compile_options|target_compile_definitions|include_directories|add_compile_options|add_definitions|find_library|set|if|else|elseif|endif|foreach|endforeach|file|include|message|option|SHARED|STATIC|PUBLIC|PRIVATE|INTERFACE)\\b");
     private static final Pattern ANNOTATION = Pattern.compile("@\\w+");
     private static final Pattern CODE_NUMBER = Pattern.compile("\\b(?:0[xX][0-9a-fA-F]+|\\d+(?:\\.\\d+)?[fFlLdD]?)\\b");
@@ -1020,6 +1021,11 @@ public class MainActivity extends AppCompatActivity {
             paint(text, ANNOTATION, R.color.code_annotation);
             paint(text, CODE_STRING, R.color.code_string);
             paint(text, HASH_COMMENT, R.color.code_comment);
+        } else if (name.endsWith(".sh") || name.endsWith(".bash")) {
+            paint(text, CODE_NUMBER, R.color.code_number);
+            paint(text, SH_KEYWORDS, R.color.code_keyword);
+            paint(text, CODE_STRING, R.color.code_string);
+            paint(text, HASH_COMMENT, R.color.code_comment);
         } else if (name.equals("cmakelists.txt") || name.endsWith(".cmake")) {
             paint(text, CODE_NUMBER, R.color.code_number);
             paint(text, CMAKE_KEYWORDS, R.color.code_keyword);
@@ -1310,6 +1316,7 @@ public class MainActivity extends AppCompatActivity {
             if (file.getName().toLowerCase(Locale.ROOT).endsWith(".py")) actions.add(new SheetAction("Run with Python", R.drawable.ic_play, false, () -> runUi.runPython(file)));
             String lowerName = file.getName().toLowerCase(Locale.ROOT);
             if (lowerName.endsWith(".js") || lowerName.endsWith(".mjs")) actions.add(new SheetAction("Run with JavaScript", R.drawable.ic_play, false, () -> runUi.runJavaScript(file)));
+            if (com.example.studiomobile.shell.ShellRuntime.isShellScript(lowerName)) actions.add(new SheetAction("Run with Shell", R.drawable.ic_play, false, () -> runUi.runShell(file)));
             if (lowerName.endsWith(".dart")) actions.add(new SheetAction("Run with Dart", R.drawable.ic_play, false, () -> runUi.runDart(file)));
             if (lowerName.endsWith(".java")) actions.add(new SheetAction("Run with Java", R.drawable.ic_play, false, () -> runUi.runJava(file)));
             if (lowerName.endsWith(".kt")) actions.add(new SheetAction("Run with Kotlin", R.drawable.ic_play, false, () -> runUi.runJava(file)));
