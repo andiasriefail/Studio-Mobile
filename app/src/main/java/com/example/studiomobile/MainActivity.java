@@ -415,6 +415,7 @@ public class MainActivity extends AppCompatActivity {
         click(R.id.home_create, this::showCreate);
         click(R.id.home_import_zip, zipUi::chooseZip);
         click(R.id.home_import_folder, zipUi::chooseFolder);
+        click(R.id.home_github, () -> com.example.studiomobile.github.GithubEntry.open(this));
         click(R.id.home_mcp, mcpUi::show);
         click(R.id.home_settings, this::showSettings);
         refreshProjects();
