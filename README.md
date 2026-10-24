@@ -1,313 +1,313 @@
 # Studio Mobile
 
-IDE Android yang berjalan **langsung di HP**: menulis kode, build APK/AAB, menjalankan script, dan menandatangani aplikasi tanpa komputer.
+An Android IDE that runs **directly on your phone**: write code, build APK/AAB, run scripts, and sign apps without a computer.
 
-- Aplikasi: `minSdk 26` (Android 8.0+), `targetSdk 35`, dibuild dengan `compileSdk 37`
-- Bisa membuild project dengan `compileSdk` / `targetSdk` sampai **API 37 (Android 17)**
-- Bahasa utama aplikasi hasil build: **Java dan Kotlin** (layar, logika, resource XML)
+- App: `minSdk 26` (Android 8.0+), `targetSdk 35`, built with `compileSdk 37`
+- Can build projects with `compileSdk` / `targetSdk` up to **API 37 (Android 17)**
+- Main languages of the built app: **Java and Kotlin** (screens, logic, XML resources)
 
-## Daftar isi
+## Table of contents
 
-1. [Ringkasan kemampuan](#ringkasan-kemampuan)
-2. [Dua build engine](#dua-build-engine)
-    - [1. Build lokal (default, ringan)](#1-build-lokal-default-ringan)
-    - [2. Build Gradle + JDK](#2-build-gradle--jdk)
-    - [Pemeriksaan sebelum build (build lokal)](#pemeriksaan-sebelum-build-build-lokal)
-    - [Build berjalan di latar belakang](#build-berjalan-di-latar-belakang)
-3. [Java dan JDK](#java-dan-jdk)
-4. [Gradle dan AGP](#gradle-dan-agp)
-5. [Bahasa lain](#bahasa-lain)
-    - [Python (arm64-v8a saja)](#python-arm64-v8a-saja)
-    - [Dart (arm64-v8a saja)](#dart-arm64-v8a-saja)
-    - [Flutter (arm64-v8a saja, tahap awal)](#flutter-arm64-v8a-saja-tahap-awal)
-    - [C/C++ (arm64-v8a saja)](#cc-arm64-v8a-saja)
-    - [JavaScript dan web](#javascript-dan-web)
-6. [Menjalankan kode di editor (Run)](#menjalankan-kode-di-editor-run)
-7. [Membuat project baru](#membuat-project-baru)
-8. [Struktur project multi-bahasa](#struktur-project-multi-bahasa)
-    - [Contoh file kunci](#contoh-file-kunci)
-9. [Preview (XML dan WebView)](#preview-xml-dan-webview)
-    - [Mode yang dipilih otomatis](#mode-yang-dipilih-otomatis)
-    - [Preview layout XML](#preview-layout-xml)
-    - [Preview WebView](#preview-webview)
-    - [Preview mengikuti perubahan](#preview-mengikuti-perubahan)
-10. [Dependensi, Repository URL, dan JitPack](#dependensi-repository-url-dan-jitpack)
-    - [Contoh: JitPack (Groovy)](#contoh-jitpack-groovy)
-    - [Contoh: JitPack (Kotlin DSL)](#contoh-jitpack-kotlin-dsl)
-    - [Contoh: repository URL lain](#contoh-repository-url-lain)
-    - [Contoh: batasi repository dengan `content`](#contoh-batasi-repository-dengan-content)
-    - [Yang tidak didukung (akan muncul sebagai peringatan di log build)](#yang-tidak-didukung-akan-muncul-sebagai-peringatan-di-log-build)
-    - [Verifikasi file library (SHA-1 dan SHA-256)](#verifikasi-file-library-sha-1-dan-sha-256)
-    - [Keamanan unduhan](#keamanan-unduhan)
-11. [Keamanan jaringan: HTTP diblokir, hanya HTTPS](#keamanan-jaringan-http-diblokir-hanya-https)
+1. [Capability summary](#capability-summary)
+2. [Two build engines](#two-build-engines)
+    - [1. Local build (default, lightweight)](#1-local-build-default-lightweight)
+    - [2. Gradle + JDK build](#2-gradle--jdk-build)
+    - [Pre-build checks (local build)](#pre-build-checks-local-build)
+    - [Builds run in the background](#builds-run-in-the-background)
+3. [Java and JDK](#java-and-jdk)
+4. [Gradle and AGP](#gradle-and-agp)
+5. [Other languages](#other-languages)
+    - [Python (arm64-v8a only)](#python-arm64-v8a-only)
+    - [Dart (arm64-v8a only)](#dart-arm64-v8a-only)
+    - [Flutter (arm64-v8a only, early stage)](#flutter-arm64-v8a-only-early-stage)
+    - [C/C++ (arm64-v8a only)](#cc-arm64-v8a-only)
+    - [JavaScript and web](#javascript-and-web)
+6. [Running code in the editor (Run)](#running-code-in-the-editor-run)
+7. [Creating a new project](#creating-a-new-project)
+8. [Multi-language project structure](#multi-language-project-structure)
+    - [Key file examples](#key-file-examples)
+9. [Preview (XML and WebView)](#preview-xml-and-webview)
+    - [Automatically selected mode](#automatically-selected-mode)
+    - [XML layout preview](#xml-layout-preview)
+    - [WebView preview](#webview-preview)
+    - [Preview follows changes](#preview-follows-changes)
+10. [Dependencies, Repository URL, and JitPack](#dependencies-repository-url-and-jitpack)
+    - [Example: JitPack (Groovy)](#example-jitpack-groovy)
+    - [Example: JitPack (Kotlin DSL)](#example-jitpack-kotlin-dsl)
+    - [Example: other repository URLs](#example-other-repository-urls)
+    - [Example: restrict repositories with `content`](#example-restrict-repositories-with-content)
+    - [Not supported (will appear as warnings in the build log)](#not-supported-will-appear-as-warnings-in-the-build-log)
+    - [Library file verification (SHA-1 and SHA-256)](#library-file-verification-sha-1-and-sha-256)
+    - [Download security](#download-security)
+11. [Network security: HTTP blocked, HTTPS only](#network-security-http-blocked-https-only)
 12. [Debug Mode](#debug-mode)
-    - [Cara menyalakan](#cara-menyalakan)
-    - [Cara kerja](#cara-kerja)
-    - [Penting sebelum membagikan aplikasi](#penting-sebelum-membagikan-aplikasi)
-    - [Batasan](#batasan)
-    - [Debug Mode untuk Studio Mobile sendiri](#debug-mode-untuk-studio-mobile-sendiri)
-13. [Wallpaper editor (foto dan video live)](#wallpaper-editor-foto-dan-video-live)
-14. [Keystore dan signing key](#keystore-dan-signing-key)
-    - [Keystore bawaan (default)](#keystore-bawaan-default)
-    - [Keystore sendiri (own key)](#keystore-sendiri-own-key)
-    - [Perlindungan layar (FLAG_SECURE)](#perlindungan-layar-flag_secure)
-    - [Export AAB dan key](#export-aab-dan-key)
-    - [Tempat penyimpanan dan pencadangan](#tempat-penyimpanan-dan-pencadangan)
-15. [GitHub Build dan unduh repo ZIP](#github-build-dan-unduh-repo-zip)
+    - [How to turn it on](#how-to-turn-it-on)
+    - [How it works](#how-it-works)
+    - [Important before sharing the app](#important-before-sharing-the-app)
+    - [Restrictions](#restrictions)
+    - [Debug Mode for Studio Mobile itself](#debug-mode-for-studio-mobile-itself)
+13. [Editor wallpaper (photo and live video)](#editor-wallpaper-photo-and-live-video)
+14. [Keystore and signing key](#keystore-and-signing-key)
+    - [Built-in keystore (default)](#built-in-keystore-default)
+    - [Own keystore (own key)](#own-keystore-own-key)
+    - [Screen protection (FLAG_SECURE)](#screen-protection-flag_secure)
+    - [Export AAB and key](#export-aab-and-key)
+    - [Storage location and backup](#storage-location-and-backup)
+15. [GitHub Build and repo ZIP download](#github-build-and-repo-zip-download)
     - [1. Personal access token](#1-personal-access-token)
-    - [2. Memilih repo](#2-memilih-repo)
-    - [3. Branch dan tag](#3-branch-dan-tag)
-    - [4. Workflow dan input](#4-workflow-dan-input)
-    - [5. Menjalankan dan memantau](#5-menjalankan-dan-memantau)
-    - [6. Unduh repo ZIP](#6-unduh-repo-zip)
-    - [7. Masalah umum](#7-masalah-umum)
-16. [MCP dan Relay Server](#mcp-dan-relay-server)
-    - [1. Jalankan relay](#1-jalankan-relay)
-    - [2. Variabel lingkungan relay](#2-variabel-lingkungan-relay)
-    - [3. Hubungkan HP](#3-hubungkan-hp)
-    - [4. Hubungkan AI](#4-hubungkan-ai)
-    - [5. Tool yang tersedia untuk AI](#5-tool-yang-tersedia-untuk-ai)
-    - [6. Contoh perintah ke AI](#6-contoh-perintah-ke-ai)
-    - [7. Keamanan](#7-keamanan)
-    - [8. Masalah umum](#8-masalah-umum)
-17. [Fitur IDE](#fitur-ide)
-18. [Keterbatasan](#keterbatasan)
-19. [Lisensi](#lisensi)
+    - [2. Choosing a repo](#2-choosing-a-repo)
+    - [3. Branch and tag](#3-branch-and-tag)
+    - [4. Workflow and inputs](#4-workflow-and-inputs)
+    - [5. Running and monitoring](#5-running-and-monitoring)
+    - [6. Download repo ZIP](#6-download-repo-zip)
+    - [7. Common problems](#7-common-problems)
+16. [MCP and Relay Server](#mcp-and-relay-server)
+    - [1. Run the relay](#1-run-the-relay)
+    - [2. Relay environment variables](#2-relay-environment-variables)
+    - [3. Connect the phone](#3-connect-the-phone)
+    - [4. Connect the AI](#4-connect-the-ai)
+    - [5. Tools available to the AI](#5-tools-available-to-the-ai)
+    - [6. Example commands to the AI](#6-example-commands-to-the-ai)
+    - [7. Security](#7-security)
+    - [8. Common problems](#8-common-problems)
+17. [IDE features](#ide-features)
+18. [Limitations](#limitations)
+19. [License](#license)
 
-**Panduan cepat: mau melakukan apa?**
+**Quick guide: what do you want to do?**
 
-| Kebutuhan | Baca bagian |
+| Need | Read section |
 |---|---|
-| Membuat project baru dari nol | [Membuat project baru](#membuat-project-baru) |
-| Membuild APK di HP | [Dua build engine](#dua-build-engine) |
-| Build gagal, mencari penyebabnya | [Pemeriksaan sebelum build](#pemeriksaan-sebelum-build-build-lokal), [Build Error Logs](#fitur-ide) |
-| Memilih versi Java, Gradle, atau AGP | [Java dan JDK](#java-dan-jdk), [Gradle dan AGP](#gradle-dan-agp) |
-| Menjalankan satu file Python, JS, Dart, Java, atau Kotlin | [Menjalankan kode di editor (Run)](#menjalankan-kode-di-editor-run) |
-| Memakai library dari JitPack atau repository lain | [Dependensi, Repository URL, dan JitPack](#dependensi-repository-url-dan-jitpack) |
-| Menambah SHA-256 pin untuk library | [Verifikasi file library](#verifikasi-file-library-sha-1-dan-sha-256) |
-| Melihat crash aplikasi hasil build | [Debug Mode](#debug-mode) |
-| Membuat dan memasang token GitHub | [GitHub: Personal access token](#1-personal-access-token) |
-| Memilih repo sendiri dari daftar | [GitHub: Memilih repo](#2-memilih-repo) |
-| Memilih branch atau tag | [GitHub: Branch dan tag](#3-branch-dan-tag) |
-| Menjalankan workflow GitHub Actions | [GitHub: Workflow dan input](#4-workflow-dan-input), [Menjalankan dan memantau](#5-menjalankan-dan-memantau) |
-| Membaca log dan error build GitHub | [GitHub: Log](#5-menjalankan-dan-memantau) |
-| Mengunduh repo sebagai ZIP ke folder Download | [GitHub: Unduh repo ZIP](#6-unduh-repo-zip) |
-| Menghubungkan AI (Claude, ChatGPT, Gemini) | [MCP dan Relay Server](#mcp-dan-relay-server) |
-| Menandatangani aplikasi dengan key sendiri | [Keystore dan signing key](#keystore-dan-signing-key) |
-| Mencadangkan atau mengimpor keystore (`.p12`) | [Tempat penyimpanan dan pencadangan](#tempat-penyimpanan-dan-pencadangan) |
-| Memahami proteksi screenshot di halaman Keystore | [Perlindungan layar (FLAG_SECURE)](#perlindungan-layar-flag_secure) |
-| Export AAB untuk Google Play | [Export AAB dan key](#export-aab-dan-key) |
-| Mengganti wallpaper editor | [Wallpaper editor](#wallpaper-editor-foto-dan-video-live) |
-| Mengetahui batas dan hal yang belum didukung | [Keterbatasan](#keterbatasan) |
+| Create a new project from scratch | [Creating a new project](#creating-a-new-project) |
+| Build an APK on the phone | [Two build engines](#two-build-engines) |
+| Build failed, looking for the cause | [Pre-build checks](#pre-build-checks-local-build), [Build Error Logs](#ide-features) |
+| Choose a Java, Gradle, or AGP version | [Java and JDK](#java-and-jdk), [Gradle and AGP](#gradle-and-agp) |
+| Run a single Python, JS, Dart, Java, or Kotlin file | [Running code in the editor (Run)](#running-code-in-the-editor-run) |
+| Use a library from JitPack or another repository | [Dependencies, Repository URL, and JitPack](#dependencies-repository-url-and-jitpack) |
+| Add a SHA-256 pin for a library | [Library file verification](#library-file-verification-sha-1-and-sha-256) |
+| See crashes of the built app | [Debug Mode](#debug-mode) |
+| Create and set up a GitHub token | [GitHub: Personal access token](#1-personal-access-token) |
+| Pick your own repo from a list | [GitHub: Choosing a repo](#2-choosing-a-repo) |
+| Choose a branch or tag | [GitHub: Branch and tag](#3-branch-and-tag) |
+| Run a GitHub Actions workflow | [GitHub: Workflow and inputs](#4-workflow-and-inputs), [Running and monitoring](#5-running-and-monitoring) |
+| Read GitHub build logs and errors | [GitHub: Logs](#5-running-and-monitoring) |
+| Download a repo as a ZIP to the Download folder | [GitHub: Download repo ZIP](#6-download-repo-zip) |
+| Connect an AI (Claude, ChatGPT, Gemini) | [MCP and Relay Server](#mcp-and-relay-server) |
+| Sign the app with your own key | [Keystore and signing key](#keystore-and-signing-key) |
+| Back up or import a keystore (`.p12`) | [Storage location and backup](#storage-location-and-backup) |
+| Understand screenshot protection on the Keystore page | [Screen protection (FLAG_SECURE)](#screen-protection-flag_secure) |
+| Export an AAB for Google Play | [Export AAB and key](#export-aab-and-key) |
+| Change the editor wallpaper | [Editor wallpaper](#editor-wallpaper-photo-and-live-video) |
+| Learn the limits and what is not yet supported | [Limitations](#limitations) |
 
 
 ---
 
-## Ringkasan kemampuan
+## Capability summary
 
-| Area | Dukungan |
+| Area | Support |
 |---|---|
-| Java | **8 sampai 25** (disarankan 17) |
-| Kotlin | Ya (compiler 2.4.20, in-process) |
-| Gradle Plugin (AGP) | Ya, lewat build engine Gradle (AGP 7.0 sampai 9.4) |
-| Build lokal | Ya, tanpa JDK dan tanpa Gradle |
-| Build Gradle + JDK | Ya, JDK **11, 17, 21, 25, 27** |
-| Python | CPython 3.14.8, **arm64-v8a saja** |
-| Dart | 3.13.5, **arm64-v8a saja** (Dart murni, tanpa pub) |
-| Flutter | SDK 3.47.7, **arm64-v8a saja**. Tahap awal: SDK dipasang dan dicek di HP, **APK Flutter belum bisa dibuat** |
-| C/C++ | NDK r29 (clang) di HP, **arm64-v8a saja** |
-| JavaScript | **Node.js 24.x asli**, semua ABI (arm64-v8a, armeabi-v7a, x86_64, x86) |
-| JSX / TSX / TS | Diubah ke JavaScript saat build (Sucrase lewat QuickJS) |
-| Run dari editor | Python, JavaScript, Dart, Java, dan Kotlin (satu file, output langsung) |
-| Preview | Layout XML dan halaman HTML/WebView, tanpa build APK |
-| Repository | Google, Maven Central, **JitPack**, dan URL Maven HTTPS lain |
-| Annotation processor | Dagger, AutoValue, Glide, ButterKnife, MapStruct, dan sejenisnya, **untuk sumber Java** (tanpa kapt) |
-| Pemeriksaan crash | Build lokal berhenti bila ada crash yang pasti terjadi, sebelum APK dibuat |
-| Project baru | Wizard 4 langkah (ikon, identitas, versi, versi Android) dengan file awal siap build |
-| Wallpaper editor | Foto, atau **video live maksimal 60 detik**, di belakang code editor |
-| GitHub Build | Pilih repo dari daftar (atau tempel URL), pilih branch/tag dan workflow, jalankan di GitHub Actions, lihat log, unduh hasilnya, dan pasang APK |
-| Unduh repo ZIP | Repo sendiri atau repo orang lain diunduh langsung ke folder **Download** |
-| Debug Mode | Penangkap crash di aplikasi hasil build, dan untuk Studio Mobile sendiri |
-| MCP | Relay milik sendiri, untuk Claude, ChatGPT, dan Gemini CLI |
-| Keystore | Satu key per project: key bawaan untuk uji coba, atau key sendiri (buat baru atau import `.p12`), halaman Keystore dilindungi `FLAG_SECURE` dari screenshot dan rekam layar |
-| Output | APK (tertandatangani), AAB untuk Google Play |
+| Java | **8 to 25** (17 recommended) |
+| Kotlin | Yes (compiler 2.4.20, in-process) |
+| Gradle Plugin (AGP) | Yes, via the Gradle build engine (AGP 7.0 to 9.4) |
+| Local build | Yes, without JDK and without Gradle |
+| Gradle + JDK build | Yes, JDK **11, 17, 21, 25, 27** |
+| Python | CPython 3.14.8, **arm64-v8a only** |
+| Dart | 3.13.5, **arm64-v8a only** (pure Dart, no pub) |
+| Flutter | SDK 3.47.7, **arm64-v8a only**. Early stage: the SDK is installed and checked on the phone, **Flutter APKs cannot be built yet** |
+| C/C++ | NDK r29 (clang) on the phone, **arm64-v8a only** |
+| JavaScript | **Native Node.js 24.x**, all ABIs (arm64-v8a, armeabi-v7a, x86_64, x86) |
+| JSX / TSX / TS | Converted to JavaScript at build time (Sucrase via QuickJS) |
+| Run from editor | Python, JavaScript, Dart, Java, and Kotlin (single file, live output) |
+| Preview | XML layouts and HTML/WebView pages, without building an APK |
+| Repository | Google, Maven Central, **JitPack**, and other HTTPS Maven URLs |
+| Annotation processor | Dagger, AutoValue, Glide, ButterKnife, MapStruct, and the like, **for Java sources** (no kapt) |
+| Crash checks | The local build stops if a crash is certain to occur, before the APK is created |
+| New project | 4-step wizard (icon, identity, version, Android versions) with ready-to-build starter files |
+| Editor wallpaper | Photo, or **live video up to 60 seconds**, behind the code editor |
+| GitHub Build | Pick a repo from a list (or paste a URL), pick a branch/tag and workflow, run on GitHub Actions, view logs, download the result, and install the APK |
+| Download repo ZIP | Your own repo or someone else's repo downloaded directly to the **Download** folder |
+| Debug Mode | Crash catcher in the built app, and for Studio Mobile itself |
+| MCP | Your own relay, for Claude, ChatGPT, and Gemini CLI |
+| Keystore | One key per project: a built-in key for testing, or your own key (create new or import `.p12`); the Keystore page is protected by `FLAG_SECURE` against screenshots and screen recording |
+| Output | APK (signed), AAB for Google Play |
 
 ---
 
-## Dua build engine
+## Two build engines
 
-Studio Mobile memilih engine otomatis untuk setiap project. Project **Flutter** dikenali lebih dulu dan memakai jalur terpisah (lihat [Flutter](#flutter-arm64-v8a-saja-tahap-awal)).
+Studio Mobile chooses the engine automatically for each project. **Flutter** projects are recognized first and use a separate path (see [Flutter](#flutter-arm64-v8a-only-early-stage)).
 
-### 1. Build lokal (default, ringan)
+### 1. Local build (default, lightweight)
 
-Semua berjalan **di dalam aplikasi**, tanpa JDK dan tanpa Gradle:
+Everything runs **inside the app**, without JDK and without Gradle:
 
-ECJ (Java) + compiler Kotlin → D8/R8 → aapt2 → zipalign → tanda tangan APK (apksig) → verifikasi.
+ECJ (Java) + Kotlin compiler → D8/R8 → aapt2 → zipalign → APK signing (apksig) → verification.
 
-- Cocok untuk project sederhana yang hanya memakai plugin `com.android.application`, `com.android.library`, `kotlin-android`, `java`, `java-library`, `org.jetbrains.kotlin.jvm`
-- Membaca `build.gradle` / `build.gradle.kts` dengan parser sendiri (bukan menjalankan Gradle). Tulis `compileSdk`, `targetSdk`, `minSdk` sebagai angka biasa, bukan variabel
-- Mendukung modul library, AAR, view binding, BuildConfig, manifest merging, dan code shrinking (R8) mengikuti `minifyEnabled`
-- Menjalankan **annotation processor** Java di HP (Dagger, AutoValue, Glide, ButterKnife, MapStruct, ...): processor diubah ke DEX, dimuat lewat `DexClassLoader`, lalu dijalankan oleh ECJ dengan `-proc:only`. Kode hasil generate ikut dikompilasi. Hanya sumber Java yang dibaca; Kotlin yang butuh kapt tidak didukung
-- Menjalankan [pemeriksaan sebelum build](#pemeriksaan-sebelum-build-build-lokal)
-- **Export AAB** didukung: bundle dipaketkan langsung oleh Studio Mobile (tanpa bundletool) dan ditandatangani dengan key project
+- Suitable for simple projects that only use the plugins `com.android.application`, `com.android.library`, `kotlin-android`, `java`, `java-library`, `org.jetbrains.kotlin.jvm`
+- Reads `build.gradle` / `build.gradle.kts` with its own parser (it does not run Gradle). Write `compileSdk`, `targetSdk`, `minSdk` as plain numbers, not variables
+- Supports library modules, AAR, view binding, BuildConfig, manifest merging, and code shrinking (R8) following `minifyEnabled`
+- Runs Java **annotation processors** on the phone (Dagger, AutoValue, Glide, ButterKnife, MapStruct, ...): the processors are converted to DEX, loaded via `DexClassLoader`, then run by ECJ with `-proc:only`. The generated code is compiled as well. Only Java sources are read; Kotlin that needs kapt is not supported
+- Runs the [pre-build checks](#pre-build-checks-local-build)
+- **Export AAB** is supported: the bundle is packaged directly by Studio Mobile (without bundletool) and signed with the project key
 
-### 2. Build Gradle + JDK
+### 2. Gradle + JDK build
 
-Dipakai otomatis bila project:
+Used automatically if the project:
 
-- punya `gradlew` / `gradle-wrapper.properties` (project Android Studio)
-- punya folder `buildSrc` atau `build-logic`
-- memakai `apply from`, `includeBuild`, task kustom, atau plugin selain daftar di atas
+- has `gradlew` / `gradle-wrapper.properties` (an Android Studio project)
+- has a `buildSrc` or `build-logic` folder
+- uses `apply from`, `includeBuild`, custom tasks, or plugins other than the list above
 
-Studio Mobile memilih **Gradle dan JDK sekaligus** berdasarkan kebutuhan project (versi wrapper, AGP, level Java) dan tabel kompatibilitas AGP/Gradle/JDK. Versi Gradle dari wrapper dicoba lebih dulu; versi lain hanya dipakai bila tidak bisa dijalankan.
+Studio Mobile chooses **Gradle and JDK together** based on the project's needs (wrapper version, AGP, Java level) and the AGP/Gradle/JDK compatibility table. The Gradle version from the wrapper is tried first; another version is only used if that one cannot run.
 
-Task yang dijalankan: `assembleDebug`. Saat **Export AAB**, task `bundleRelease` ikut dijalankan pada proses Gradle yang sama:
+Task that is run: `assembleDebug`. During **Export AAB**, the `bundleRelease` task is also run in the same Gradle process:
 
-- Yang dibuild adalah varian **release**, bukan debug, karena Google Play menolak bundle yang debuggable. Build type `release` dari file Gradle project dipakai apa adanya (minify, resource, dan signing)
-- Key yang dipilih di halaman **Keystore** diteruskan ke Gradle lewat properti signing sementara (sama seperti *Generate Signed Bundle* di Android Studio)
-- Bila tidak ada key yang dipilih **dan** `build.gradle` tidak punya `signingConfig` untuk release, bundle tidak ditandatangani dan Google Play akan menolaknya; log memberi peringatan
-- APK debug tetap dibuild pada run yang sama, dan hasil bundle disimpan di `Studio Mobile/Export AAB/<nama app>.aab`
-- Bila Gradle selesai tetapi tidak ada file `.aab` di `<modul>/build/outputs/bundle/release`, build dinyatakan gagal. Pastikan modul aplikasi memakai plugin `com.android.application`
+- What is built is the **release** variant, not debug, because Google Play rejects debuggable bundles. The `release` build type from the project's Gradle file is used as-is (minify, resources, and signing)
+- The key selected on the **Keystore** page is passed to Gradle through temporary signing properties (the same as *Generate Signed Bundle* in Android Studio)
+- If no key is selected **and** `build.gradle` has no release `signingConfig`, the bundle is not signed and Google Play will reject it; the log gives a warning
+- The debug APK is still built in the same run, and the bundle result is saved at `Studio Mobile/Export AAB/<app name>.aab`
+- If Gradle finishes but there is no `.aab` file in `<module>/build/outputs/bundle/release`, the build is declared failed. Make sure the app module uses the `com.android.application` plugin
 
-### Pemeriksaan sebelum build (build lokal)
+### Pre-build checks (local build)
 
-Setelah kompilasi, build lokal mencari masalah yang **lolos kompilasi tetapi pasti membuat aplikasi crash**, supaya APK rusak tidak pernah dibuat. Hanya kasus yang pasti yang dilaporkan, tanpa menebak. Build **dihentikan** dengan pesan *"App would crash at runtime; build stopped, no APK was generated."* bila:
+After compilation, the local build looks for problems that **pass compilation but will certainly make the app crash**, so that a broken APK is never created. Only certain cases are reported, with no guessing. The build is **stopped** with the message *"App would crash at runtime; build stopped, no APK was generated."* if:
 
-- compiler melaporkan *Null pointer access* yang pasti terjadi (bentuk *Potential null pointer access* diabaikan)
-- `<activity>`, `<service>`, `<receiver>`, atau `<provider>` di manifest menunjuk class yang tidak ada di kode hasil kompilasi
-- sebuah Activity dipanggil lewat `Intent` tetapi belum dideklarasikan di `AndroidManifest.xml`
-- sebuah komponen punya `intent-filter` tetapi tanpa `android:exported`, padahal `targetSdk` 31 ke atas mewajibkannya (APK tidak bisa dipasang)
+- the compiler reports a *Null pointer access* that is certain to happen (the *Potential null pointer access* form is ignored)
+- an `<activity>`, `<service>`, `<receiver>`, or `<provider>` in the manifest points to a class that does not exist in the compiled code
+- an Activity is called through an `Intent` but has not been declared in `AndroidManifest.xml`
+- a component has an `intent-filter` but no `android:exported`, even though `targetSdk` 31 and above requires it (the APK cannot be installed)
 
-Satu pemeriksaan hanya **peringatan** di log dan tidak menghentikan build: kode memakai kelas jaringan (`HttpURLConnection`, `Socket`, ...) tetapi manifest tidak punya izin `INTERNET`.
+One check is only a **warning** in the log and does not stop the build: the code uses network classes (`HttpURLConnection`, `Socket`, ...) but the manifest has no `INTERNET` permission.
 
-### Build berjalan di latar belakang
+### Builds run in the background
 
-Build dijalankan di sebuah *foreground service*, jadi tetap lanjut walau aplikasi ditinggalkan atau layar mati. Selama build tampil notifikasi berjalan berisi langkah saat ini, bar progres, waktu berjalan, dan tombol **Stop**; saat selesai diganti notifikasi hasil. Aplikasi meminta sekali agar dikecualikan dari penghematan baterai, dan pilihannya ada di dialog sistem.
+Builds run in a *foreground service*, so they keep going even if the app is left or the screen is turned off. During the build, an ongoing notification is shown containing the current step, a progress bar, elapsed time, and a **Stop** button; when finished it is replaced by a result notification. The app asks once to be exempted from battery optimization, and the choice is in the system dialog.
 
 ---
 
-## Java dan JDK
+## Java and JDK
 
-**Level bahasa Java**
+**Java language level**
 
-- Didukung **Java 8 sampai Java 25**. Project tanpa deklarasi dibuild dengan Java 25
-- Level di atas 25 (`sourceCompatibility`, `targetCompatibility`, `jvmTarget`, `jvmToolchain`) **ditolak sebelum kompilasi**, begitu juga library lokal di `libs/` yang dikompilasi untuk Java lebih baru
-- Level di bawah 8 hanya memberi peringatan dan dikompilasi sebagai Java 8
+- **Java 8 to Java 25** is supported. Projects without a declaration are built with Java 25
+- Levels above 25 (`sourceCompatibility`, `targetCompatibility`, `jvmTarget`, `jvmToolchain`) are **rejected before compilation**, as are local libraries in `libs/` compiled for newer Java
+- Levels below 8 only give a warning and are compiled as Java 8
 
-**JDK untuk build Gradle** (diunduh sekali, SHA-256 diverifikasi, arsitektur **arm64-v8a dan armeabi-v7a**):
+**JDK for Gradle builds** (downloaded once, SHA-256 verified, architectures **arm64-v8a and armeabi-v7a**):
 
-| JDK | Keterangan |
+| JDK | Notes |
 |---|---|
-| 11 | Untuk AGP 7.x |
-| 17 | Minimum AGP 8.x dan 9.x |
-| 21 | Satu-satunya versi yang sudah ditandai *verified* di `tools/gradle-jdk.json` |
-| 25 | Didukung Gradle 9.1+ |
-| 27 | Tersedia untuk diunduh, tetapi tabel kompatibilitas saat ini hanya sampai JDK 26, jadi belum dipasangkan dengan Gradle mana pun |
+| 11 | For AGP 7.x |
+| 17 | Minimum for AGP 8.x and 9.x |
+| 21 | The only version already marked *verified* in `tools/gradle-jdk.json` |
+| 25 | Supported by Gradle 9.1+ |
+| 27 | Available to download, but the compatibility table currently only goes up to JDK 26, so it is not yet paired with any Gradle |
 
-Tidak ada JDK untuk x86 dan x86_64, jadi build Gradle hanya jalan di HP ARM.
+There is no JDK for x86 and x86_64, so Gradle builds only run on ARM phones.
 
 ---
 
-## Gradle dan AGP
+## Gradle and AGP
 
-**Versi Gradle yang tersedia** (diunduh dari `services.gradle.org`):
+**Available Gradle versions** (downloaded from `services.gradle.org`):
 
-`7.6.6`, `8.13`, `8.14.6`, `9.5.0`, `9.8.1` (`9.8.1` wajib ada)
+`7.6.6`, `8.13`, `8.14.6`, `9.5.0`, `9.8.1` (`9.8.1` must be present)
 
-**Tabel kompatibilitas AGP** (`assets/build-tools/gradle-compat.json`, bisa diedit tanpa mengubah kode):
+**AGP compatibility table** (`assets/build-tools/gradle-compat.json`, can be edited without changing code):
 
-| AGP | Gradle minimum | Gradle maksimum | JDK minimum |
+| AGP | Minimum Gradle | Maximum Gradle | Minimum JDK |
 |---|---|---|---|
-| 7.0 sampai 7.4 | 7.0.2 sampai 7.5 | di bawah 8.0 | 11 |
-| 8.0 sampai 8.13 | 8.0 sampai 8.13 | di bawah 9.6 | 17 |
-| 9.4 | 9.6.0 | bebas | 17 |
+| 7.0 to 7.4 | 7.0.2 to 7.5 | below 8.0 | 11 |
+| 8.0 to 8.13 | 8.0 to 8.13 | below 9.6 | 17 |
+| 9.4 | 9.6.0 | unbounded | 17 |
 
-Catatan: baris AGP 7.x ditandai `verify: true`, belum dicocokkan dengan tabel resmi.
+Note: the AGP 7.x rows are marked `verify: true`, not yet matched against the official table.
 
-**JDK maksimum per Gradle:** 7.6 → JDK 19, 8.5 → 21, 8.10 → 23, 8.14 dan 9.0 → 24, 9.1 → 25, 9.4+ → 26.
-
----
-
-## Bahasa lain
-
-### Python (arm64-v8a saja)
-
-- CPython 3.14.8. Interpreter ikut di dalam APK, standard library diunduh sekali saat pertama dipakai
-- Menjalankan **satu file `.py`** dari editor, untuk script, otomasi, dan olah data
-- Python **tidak dikemas ke APK** dan tidak bisa membuat tampilan aplikasi
-
-### Dart (arm64-v8a saja)
-
-- Dart SDK 3.13.5. `src/main/dart/main.dart` dikompilasi ke kernel dan dikemas ke APK bersama Dart VM
-- Dipanggil dari Java/Kotlin lewat kelas `studio.dart.StudioDart`
-- Hanya core library Dart. **Tidak ada pub package**. Untuk project Flutter lihat bagian berikutnya
-
-### Flutter (arm64-v8a saja, tahap awal)
-
-- Project dianggap Flutter bila punya `pubspec.yaml` dengan dependensi `flutter: sdk: flutter` **dan** folder `android/` berisi file Gradle. Project Dart murni (tanpa dependensi Flutter) tetap lewat jalur Dart. Bila `android/` belum ada, buat di komputer dengan `flutter create --platforms=android .` lalu pindahkan project lagi
-- Hanya HP **arm64-v8a**. Di HP lain build berhenti dengan pesan bahwa Flutter butuh HP arm64
-- Pertama kali dipakai, Flutter SDK 3.47.7 (arsip sekitar 550 MB, butuh sekitar 2 GB ruang kosong) diunduh sekali dan SHA-256-nya diverifikasi. Tiga executable (`dart`, `gen_snapshot`, `impellerc`) ikut di dalam APK sebagai `libflutterdart.so`, `libgensnapshot.so`, dan `libimpellerc.so`, karena Android 10+ hanya mengizinkan eksekusi dari folder native library aplikasi
-- **Status sekarang:** build memasang SDK lalu mengecek apakah tool Flutter bisa berjalan di HP. Hasil cek ada di Build Logs pada baris `[flutter-check]`. **Langkah pembuatan APK belum tersedia**, jadi build project Flutter masih berakhir dengan status gagal beserta penjelasan ini
-
-### C/C++ (arm64-v8a saja)
-
-- NDK r29 (clang) diunduh sekali, membuild `lib<nama>.so` untuk dipanggil lewat JNI
-- Mode CMake + Ninja bila ada, atau clang langsung untuk subset CMake yang dikenali
-- Library 64-bit di-link dengan alignment 16 KB (syarat Google Play)
-- Di HP non-arm64, project tetap bisa memakai file `.so` prebuilt di `src/main/jniLibs/<abi>/` (buat lewat GitHub Actions, ada template `native-build.yml`)
-
-### JavaScript dan web
-
-- `.js` dan `.mjs` dijalankan dengan **binary Node.js asli** yang ikut di APK per ABI (`libnodeexe.so`), dibuild dari [andiasriefail/node-android-build](https://github.com/andiasriefail/node-android-build)
-- File `.js` diperlakukan sebagai CommonJS (`require`). Untuk ES modules pakai `.mjs`
-- Cek sintaks memakai `node --check`
-- `.jsx`, `.tsx`, `.ts` di `src/main/assets` diubah otomatis ke `.js` saat build (React di WebView)
+**Maximum JDK per Gradle:** 7.6 → JDK 19, 8.5 → 21, 8.10 → 23, 8.14 and 9.0 → 24, 9.1 → 25, 9.4+ → 26.
 
 ---
 
-## Menjalankan kode di editor (Run)
+## Other languages
 
-Studio Mobile bisa **menjalankan satu file langsung di HP**, tanpa membuild APK. Hasilnya tampil live di jendela output yang punya tombol **Stop**.
+### Python (arm64-v8a only)
 
-**Cara:** di pohon file editor, tekan tombol **⋮** di samping nama file → pilih **Run with ...**. Simpan file lebih dulu; file yang belum disimpan akan ditolak dengan pesan *"Save the file before running it"*.
+- CPython 3.14.8. The interpreter is included in the APK, the standard library is downloaded once on first use
+- Runs **a single `.py` file** from the editor, for scripts, automation, and data processing
+- Python is **not packaged into the APK** and cannot create the app's UI
 
-| File | Menu | Dijalankan dengan | Batas waktu | Catatan |
+### Dart (arm64-v8a only)
+
+- Dart SDK 3.13.5. `src/main/dart/main.dart` is compiled to a kernel and packaged into the APK together with the Dart VM
+- Called from Java/Kotlin through the `studio.dart.StudioDart` class
+- Dart core libraries only. **No pub packages**. For Flutter projects see the next section
+
+### Flutter (arm64-v8a only, early stage)
+
+- A project is considered Flutter if it has a `pubspec.yaml` with the dependency `flutter: sdk: flutter` **and** an `android/` folder containing Gradle files. Pure Dart projects (without a Flutter dependency) still go through the Dart path. If `android/` does not exist yet, create it on a computer with `flutter create --platforms=android .` and then move the project back
+- **arm64-v8a** phones only. On other phones the build stops with a message that Flutter needs an arm64 phone
+- On first use, Flutter SDK 3.47.7 (archive of about 550 MB, needs about 2 GB of free space) is downloaded once and its SHA-256 is verified. Three executables (`dart`, `gen_snapshot`, `impellerc`) are included in the APK as `libflutterdart.so`, `libgensnapshot.so`, and `libimpellerc.so`, because Android 10+ only allows execution from the app's native library folder
+- **Current status:** the build installs the SDK and then checks whether the Flutter tools can run on the phone. The check result is in the Build Logs on the `[flutter-check]` line. **The APK creation step is not yet available**, so building a Flutter project still ends with a failed status along with this explanation
+
+### C/C++ (arm64-v8a only)
+
+- NDK r29 (clang) is downloaded once, builds `lib<name>.so` to be called through JNI
+- CMake + Ninja mode if available, or clang directly for the recognized subset of CMake
+- 64-bit libraries are linked with 16 KB alignment (a Google Play requirement)
+- On non-arm64 phones, the project can still use prebuilt `.so` files in `src/main/jniLibs/<abi>/` (build them through GitHub Actions, there is a `native-build.yml` template)
+
+### JavaScript and web
+
+- `.js` and `.mjs` are run with the **native Node.js binary** included in the APK per ABI (`libnodeexe.so`), built from [andiasriefail/node-android-build](https://github.com/andiasriefail/node-android-build)
+- `.js` files are treated as CommonJS (`require`). For ES modules use `.mjs`
+- Syntax checking uses `node --check`
+- `.jsx`, `.tsx`, `.ts` in `src/main/assets` are automatically converted to `.js` at build time (React in WebView)
+
+---
+
+## Running code in the editor (Run)
+
+Studio Mobile can **run a single file directly on the phone**, without building an APK. The result is shown live in an output window that has a **Stop** button.
+
+**How:** in the editor's file tree, tap the **⋮** button next to the file name → choose **Run with ...**. Save the file first; a file that has not been saved is rejected with the message *"Save the file before running it"*.
+
+| File | Menu | Run with | Time limit | Notes |
 |---|---|---|---|---|
-| `.py` | Run with Python | CPython 3.14.8 | 120 detik | **arm64-v8a saja**. Run pertama mengunduh standard library sekali |
-| `.js`, `.mjs` | Run with JavaScript | Node.js 24.x asli (`libnodeexe.so`) | 120 detik | Semua ABI. `.js` = CommonJS, `.mjs` = ES module |
-| `.dart` | Run with Dart | Dart VM 3.13.5 | 180 detik | **arm64-v8a saja**. Hanya core library, tanpa pub dan tanpa Flutter |
-| `.java` | Run with Java | ECJ → D8 → `main()` di proses terpisah | 120 detik | File harus punya `public static void main(String[] args)` |
-| `.kt` | Run with Kotlin | Compiler Kotlin → D8 → `main()` di proses terpisah | 120 detik | File harus punya fungsi `main` |
+| `.py` | Run with Python | CPython 3.14.8 | 120 seconds | **arm64-v8a only**. The first run downloads the standard library once |
+| `.js`, `.mjs` | Run with JavaScript | Native Node.js 24.x (`libnodeexe.so`) | 120 seconds | All ABIs. `.js` = CommonJS, `.mjs` = ES module |
+| `.dart` | Run with Dart | Dart VM 3.13.5 | 180 seconds | **arm64-v8a only**. Core libraries only, no pub and no Flutter |
+| `.java` | Run with Java | ECJ → D8 → `main()` in a separate process | 120 seconds | The file must have `public static void main(String[] args)` |
+| `.kt` | Run with Kotlin | Kotlin compiler → D8 → `main()` in a separate process | 120 seconds | The file must have a `main` function |
 
-Aturan umum:
+General rules:
 
-- **Satu Run pada satu waktu.** Bila Run kedua dimulai saat yang pertama masih jalan, yang kedua langsung dibatalkan. Tekan **Stop** pada yang pertama untuk menjalankan lagi
-- Bila melewati batas waktu, proses dihentikan dan jendela output menulis `[timed out after 120 s]`
-- Saat selesai, output menulis `[process finished with exit code N]`
-- **C/C++ tidak punya tombol Run.** Kode C/C++ dibuild menjadi `lib<nama>.so` bersama aplikasi dan dipanggil lewat JNI (lihat contoh di bawah)
-- File lain (misalnya `.lua`, `.rs`, `.sh`) hanya bisa diedit dengan syntax highlighting, tanpa menu Run
-- Python, Dart, dan Node.js yang dijalankan dari editor **adalah mode script**. Hanya `src/main/dart/main.dart` yang ikut dikemas ke APK, dan JavaScript ikut APK lewat `assets` (WebView). Python tidak dikemas ke APK
+- **One Run at a time.** If a second Run starts while the first is still running, the second is canceled immediately. Press **Stop** on the first one to run again
+- If the time limit is exceeded, the process is stopped and the output window writes `[timed out after 120 s]`
+- When finished, the output writes `[process finished with exit code N]`
+- **C/C++ has no Run button.** C/C++ code is built into `lib<name>.so` together with the app and called through JNI (see the example below)
+- Other files (for example `.lua`, `.rs`, `.sh`) can only be edited with syntax highlighting, without a Run menu
+- Python, Dart, and Node.js run from the editor **are script mode**. Only `src/main/dart/main.dart` is packaged into the APK, and JavaScript goes into the APK through `assets` (WebView). Python is not packaged into the APK
 
-**Contoh file untuk dicoba**
+**Example files to try**
 
 `hello.py`
 
 ```python
 import sys
-print("Halo dari Python", sys.version.split()[0])
+print("Hello from Python", sys.version.split()[0])
 ```
 
 `hello.js`
 
 ```javascript
-console.log("Halo dari Node.js", process.version);
+console.log("Hello from Node.js", process.version);
 ```
 
 `main.dart`
 
 ```dart
 void main() {
-  print('Halo dari Dart');
+  print('Hello from Dart');
 }
 ```
 
@@ -316,7 +316,7 @@ void main() {
 ```java
 public class Hello {
     public static void main(String[] args) {
-        System.out.println("Halo dari Java");
+        System.out.println("Hello from Java");
     }
 }
 ```
@@ -325,35 +325,35 @@ public class Hello {
 
 ```kotlin
 fun main() {
-    println("Halo dari Kotlin")
+    println("Hello from Kotlin")
 }
 ```
 
-Contoh output di jendela Run untuk `hello.py`:
+Example output in the Run window for `hello.py`:
 
 ```
 $ python hello.py
-Halo dari Python 3.14.8
+Hello from Python 3.14.8
 
 [process finished with exit code 0]
 ```
 
 ---
 
-## Membuat project baru
+## Creating a new project
 
-Tombol buat project di Home membuka wizard **4 langkah**:
+The create-project button on Home opens a **4-step** wizard:
 
-| Langkah | Isi |
+| Step | Content |
 |---|---|
-| 1. App icon | Pilih gambar; dipotong persegi dari tengah. Ukuran ikon mdpi, hdpi, xhdpi, dan xxhdpi bisa diatur 16 sampai 512 px (bawaan 48, 72, 96, 144; xxxhdpi dihitung otomatis) |
-| 2. Identity | Nama project, nama aplikasi, dan package. Package kosong menjadi `com.example.<nama project>` |
-| 3. Version | `versionCode` (bawaan 1) dan `versionName` (bawaan `1.0`) |
-| 4. Android versions | Min SDK dan Target SDK, API 21 sampai 37. Bawaan 23 dan 35. Min SDK tidak bisa melebihi Target SDK. Ringkasan tampil di bagian bawah |
+| 1. App icon | Choose an image; it is cropped square from the center. The mdpi, hdpi, xhdpi, and xxhdpi icon sizes can be set from 16 to 512 px (default 48, 72, 96, 144; xxxhdpi is calculated automatically) |
+| 2. Identity | Project name, app name, and package. An empty package becomes `com.example.<project name>` |
+| 3. Version | `versionCode` (default 1) and `versionName` (default `1.0`) |
+| 4. Android versions | Min SDK and Target SDK, API 21 to 37. Defaults are 23 and 35. Min SDK cannot exceed Target SDK. A summary is shown at the bottom |
 
-Semua pilihan wizard ditulis ke `app/build.gradle` apa adanya (`minSdk`, `targetSdk`, `versionCode`, `versionName`), sehingga daftar project, editor, dan build membaca nilai yang sama. `compileSdk` bernilai 37, atau lebih tinggi bila Target SDK lebih tinggi.
+All wizard choices are written to `app/build.gradle` as-is (`minSdk`, `targetSdk`, `versionCode`, `versionName`), so the project list, editor, and build read the same values. `compileSdk` is 37, or higher if Target SDK is higher.
 
-**File yang dibuat** (file yang sudah ada tidak pernah ditimpa; bila ada langkah yang gagal, semua yang sudah ditulis dihapus lagi):
+**Files created** (existing files are never overwritten; if any step fails, everything already written is deleted again):
 
 ```
 settings.gradle
@@ -361,73 +361,73 @@ build.gradle
 gradle/libs.versions.toml        (AGP 8.13.1)
 app/build.gradle                 (Groovy DSL, Java 17)
 app/proguard-rules.pro
-app/src/main/AndroidManifest.xml (tanpa atribut package; namespace ada di build.gradle)
+app/src/main/AndroidManifest.xml (without the package attribute; the namespace is in build.gradle)
 app/src/main/java/<package>/MainActivity.java
 app/src/main/res/values/strings.xml
 app/src/main/res/values/themes.xml
-app/src/main/res/mipmap-*/ic_launcher.png   (bila ikon dipilih)
+app/src/main/res/mipmap-*/ic_launcher.png   (if an icon is chosen)
 ```
 
-Tidak dibuat: `gradlew` dan `gradle/wrapper`, `gradle.properties`, `.gitignore`, `local.properties`. Project baru dibuild oleh **build lokal**.
+Not created: `gradlew` and `gradle/wrapper`, `gradle.properties`, `.gitignore`, `local.properties`. New projects are built by the **local build**.
 
-Bila ikon dipilih, ikon toko **512 x 512 px** (PNG, siap untuk Google Play Console) juga disimpan di `Studio Mobile/Icon Google Play Console/<nama project>/ic_launcher-playstore.png`. Folder itu selalu dibuat, dan kosong bila tidak ada ikon.
+If an icon is chosen, the **512 x 512 px** store icon (PNG, ready for Google Play Console) is also saved at `Studio Mobile/Icon Google Play Console/<project name>/ic_launcher-playstore.png`. That folder is always created, and is empty if there is no icon.
 
 ---
 
-## Struktur project multi-bahasa
+## Multi-language project structure
 
-Satu project bisa memuat **Java, Kotlin, XML, C/C++, Dart, JavaScript/JSX, dan Python sekaligus**. Berikut contoh `My Project/` yang menggabungkan semuanya:
+One project can contain **Java, Kotlin, XML, C/C++, Dart, JavaScript/JSX, and Python all at once**. Below is an example `My Project/` that combines all of them:
 
 ```
 My Project/
 ├── settings.gradle
 ├── build.gradle
 ├── gradle/
-│   └── checksums.properties            # (opsional) pin SHA-256 library
-├── scripts/                            # (bebas) script yang dijalankan dari editor
-│   ├── hello.py                        # Python: Run with Python, TIDAK ikut APK
+│   └── checksums.properties            # (optional) library SHA-256 pins
+├── scripts/                            # (free) scripts run from the editor
+│   ├── hello.py                        # Python: Run with Python, NOT included in the APK
 │   └── tool.js                         # Node.js: Run with JavaScript
 └── app/
     ├── build.gradle
-    ├── libs/                           # (opsional) .jar lokal
+    ├── libs/                           # (optional) local .jar files
     └── src/main/
         ├── AndroidManifest.xml
-        ├── java/com/contoh/app/
-        │   ├── MainActivity.java       # Java: layar dan logika
-        │   └── NativeBridge.java       # Java: deklarasi fungsi JNI
-        ├── kotlin/com/contoh/app/
-        │   └── Helper.kt               # Kotlin: berdampingan dengan Java
+        ├── java/com/example/app/
+        │   ├── MainActivity.java       # Java: screens and logic
+        │   └── NativeBridge.java       # Java: JNI function declarations
+        ├── kotlin/com/example/app/
+        │   └── Helper.kt               # Kotlin: side by side with Java
         ├── res/
-        │   ├── layout/activity_main.xml    # XML: tampilan (bisa di-Preview)
+        │   ├── layout/activity_main.xml    # XML: UI (can be Previewed)
         │   └── values/strings.xml
-        ├── assets/                     # Web: dimuat di WebView
+        ├── assets/                     # Web: loaded in WebView
         │   ├── index.html
-        │   ├── App.jsx                 # diubah otomatis ke App.js saat build
+        │   ├── App.jsx                 # automatically converted to App.js at build time
         │   └── style.css
         ├── cpp/                        # C/C++: NDK r29, arm64-v8a
         │   ├── CMakeLists.txt
         │   └── native-lib.cpp
         ├── dart/
-        │   └── main.dart               # Dart: titik masuk, dikemas ke APK
-        └── jniLibs/                    # (opsional) .so prebuilt, per ABI
+        │   └── main.dart               # Dart: entry point, packaged into the APK
+        └── jniLibs/                    # (optional) prebuilt .so, per ABI
             └── arm64-v8a/
 ```
 
-Peran tiap bagian:
+Role of each part:
 
-| Folder | Bahasa | Masuk APK? | Cara dipakai |
+| Folder | Language | Goes into the APK? | How it is used |
 |---|---|---|---|
-| `src/main/java`, `src/main/kotlin` | Java, Kotlin | Ya | Logika aplikasi |
-| `src/main/res` | XML | Ya | Tampilan; bisa di-Preview |
-| `src/main/assets` | HTML, CSS, JS, JSX/TSX/TS | Ya | Dimuat di `WebView`; JSX/TSX/TS diubah ke JS |
-| `src/main/cpp` | C/C++ | Ya (`lib<nama>.so`) | Dipanggil lewat JNI |
-| `src/main/dart/main.dart` | Dart | Ya (kernel + Dart VM) | Dipanggil lewat `studio.dart.StudioDart` |
-| `src/main/jniLibs/<abi>` | `.so` prebuilt | Ya | Untuk HP non-arm64 (hasil GitHub Actions) |
-| `scripts/` (nama bebas) | Python, Node.js | **Tidak** | Dijalankan dari editor |
+| `src/main/java`, `src/main/kotlin` | Java, Kotlin | Yes | App logic |
+| `src/main/res` | XML | Yes | UI; can be Previewed |
+| `src/main/assets` | HTML, CSS, JS, JSX/TSX/TS | Yes | Loaded in `WebView`; JSX/TSX/TS are converted to JS |
+| `src/main/cpp` | C/C++ | Yes (`lib<name>.so`) | Called through JNI |
+| `src/main/dart/main.dart` | Dart | Yes (kernel + Dart VM) | Called through `studio.dart.StudioDart` |
+| `src/main/jniLibs/<abi>` | Prebuilt `.so` | Yes | For non-arm64 phones (GitHub Actions result) |
+| `scripts/` (free name) | Python, Node.js | **No** | Run from the editor |
 
-> Catatan: Python, Dart, dan C/C++ hanya untuk **arm64-v8a**. Di HP lain, bagian itu tidak bisa dibuild atau dijalankan di perangkat; pakai `.so` prebuilt di `jniLibs/<abi>/` untuk C/C++.
+> Note: Python, Dart, and C/C++ are for **arm64-v8a** only. On other phones, those parts cannot be built or run on the device; use prebuilt `.so` files in `jniLibs/<abi>/` for C/C++.
 
-### Contoh file kunci
+### Key file examples
 
 `app/build.gradle`
 
@@ -438,11 +438,11 @@ plugins {
 }
 
 android {
-    namespace 'com.contoh.app'
-    compileSdk 36            // tulis sebagai angka biasa, bukan variabel
+    namespace 'com.example.app'
+    compileSdk 36            // write as a plain number, not a variable
 
     defaultConfig {
-        applicationId 'com.contoh.app'
+        applicationId 'com.example.app'
         minSdk 26
         targetSdk 35
         versionCode 1
@@ -475,23 +475,23 @@ add_library(native-lib SHARED native-lib.cpp)
 #include <jni.h>
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_contoh_app_NativeBridge_halo(JNIEnv* env, jclass) {
-    return env->NewStringUTF("Halo dari C++");
+Java_com_example_app_NativeBridge_hello(JNIEnv* env, jclass) {
+    return env->NewStringUTF("Hello from C++");
 }
 ```
 
-`app/src/main/java/com/contoh/app/NativeBridge.java`
+`app/src/main/java/com/example/app/NativeBridge.java`
 
 ```java
-package com.contoh.app;
+package com.example.app;
 
 public final class NativeBridge {
     static { System.loadLibrary("native-lib"); }
-    public static native String halo();
+    public static native String hello();
 }
 ```
 
-`app/src/main/dart/main.dart` (membaca satu baris dari Java lewat stdin dan membalas lewat stdout)
+`app/src/main/dart/main.dart` (reads a line from Java via stdin and replies via stdout)
 
 ```dart
 import 'dart:io';
@@ -499,15 +499,15 @@ import 'dart:io';
 void main() {
   stdin.listen((data) {
     final text = String.fromCharCodes(data).trim();
-    print('Dart menerima: $text');
+    print('Dart received: $text');
   });
 }
 ```
 
-`app/src/main/java/com/contoh/app/MainActivity.java` (menggabungkan layout XML, WebView, C++, Dart, dan Kotlin)
+`app/src/main/java/com/example/app/MainActivity.java` (combines XML layout, WebView, C++, Dart, and Kotlin)
 
 ```java
-package com.contoh.app;
+package com.example.app;
 
 import android.app.Activity;
 import android.os.Bundle;
@@ -525,8 +525,8 @@ public class MainActivity extends Activity {
         setContentView(R.layout.activity_main);                       // XML
 
         TextView title = findViewById(R.id.title);
-        title.setText(NativeBridge.halo());                           // C++ lewat JNI
-        title.append("\n" + Helper.INSTANCE.greet("Kotlin"));         // Kotlin dari Java
+        title.setText(NativeBridge.hello());                          // C++ via JNI
+        title.append("\n" + Helper.INSTANCE.greet("Kotlin"));         // Kotlin from Java
 
         WebView web = findViewById(R.id.web);                         // Web
         web.getSettings().setJavaScriptEnabled(true);
@@ -539,58 +539,58 @@ public class MainActivity extends Activity {
             });
             dart.send("ping");
         } catch (IOException e) {
-            Log.e("Dart", "Tidak bisa jalan: " + e.getMessage());     // mis. HP bukan arm64
+            Log.e("Dart", "Cannot run: " + e.getMessage());          // e.g. the phone is not arm64
         }
     }
 }
 ```
 
-`app/src/main/kotlin/com/contoh/app/Helper.kt`
+`app/src/main/kotlin/com/example/app/Helper.kt`
 
 ```kotlin
-package com.contoh.app
+package com.example.app
 
 object Helper {
-    fun greet(name: String) = "Halo dari $name"
+    fun greet(name: String) = "Hello from $name"
 }
 ```
 
-`scripts/hello.py` dan `scripts/tool.js` bisa langsung dijalankan dari menu **⋮ → Run with Python / JavaScript**, tanpa build.
+`scripts/hello.py` and `scripts/tool.js` can be run directly from the **⋮ → Run with Python / JavaScript** menu, without a build.
 
 ---
 
-## Preview (XML dan WebView)
+## Preview (XML and WebView)
 
-Preview menampilkan layar project **tanpa membuild APK**. Buka dari editor lewat tombol **Preview**. Tampilannya berupa bingkai HP dengan status bar, navigation bar, dan title bar yang mengikuti tema serta kode project.
+Preview shows the project's screens **without building an APK**. Open it from the editor with the **Preview** button. It appears as a phone frame with a status bar, navigation bar, and title bar that follow the project's theme and code.
 
-> **Penting:** kode Java/Kotlin project **tidak dijalankan** di preview. Kode hanya *dibaca* untuk mengetahui apa yang terjadi saat sebuah view disentuh (buka Activity lain, tampilkan Toast, tutup layar). Logika, jaringan, dan database tidak aktif.
+> **Important:** the project's Java/Kotlin code is **not run** in the preview. The code is only *read* to find out what happens when a view is touched (open another Activity, show a Toast, close the screen). Logic, network, and database are not active.
 
-### Mode yang dipilih otomatis
+### Automatically selected mode
 
-| Yang dibuka | Yang tampil |
+| What is opened | What is shown |
 |---|---|
-| `res/layout/*.xml` | **Mode Layout**: XML di-inflate dengan tema dan style milik project |
-| `assets/*.html` | **Mode Web**: halaman dimuat di WebView asli |
-| File lain / tidak ada file terbuka | Layout milik Activity launcher di manifest, atau halaman web di `assets` |
-| Kode memanggil `loadUrl("https://...")` | Halaman HTTPS itu dimuat di WebView |
+| `res/layout/*.xml` | **Layout Mode**: the XML is inflated with the project's own theme and styles |
+| `assets/*.html` | **Web Mode**: the page is loaded in a real WebView |
+| Other file / no file open | The layout of the launcher Activity in the manifest, or the web page in `assets` |
+| Code calls `loadUrl("https://...")` | That HTTPS page is loaded in the WebView |
 
-Kedua mode bisa digabung, misalnya layout yang berisi `WebView` untuk memuat `assets/index.html`.
+Both modes can be combined, for example a layout containing a `WebView` that loads `assets/index.html`.
 
-### Preview layout XML
+### XML layout preview
 
-Hanya tahap AAPT2 (compile dan link) yang berjalan, tanpa Java, DEX, atau tanda tangan, jadi cepat.
+Only the AAPT2 stage (compile and link) runs, without Java, DEX, or signing, so it is fast.
 
-Widget yang tidak bisa di-inflate langsung diganti versi preview yang membaca atribut `app:` dan `tools:`:
+Widgets that cannot be inflated directly are replaced with preview versions that read `app:` and `tools:` attributes:
 
-- `ConstraintLayout`: anchor parent/sibling/guideline, bias, rasio dimensi, chain, barrier, group, flow (versi sederhana: wrapMode none/chain/aligned, orientation, gap, maxElementsWrap, style, bias). Belum ada: flow_horizontalAlign/verticalAlign, posisi melingkar
-- `RecyclerView`, `ListView`, `GridView`, `ViewPager` (isi contoh dari `tools:listitem`)
+- `ConstraintLayout`: parent/sibling/guideline anchors, bias, dimension ratio, chain, barrier, group, flow (simple version: wrapMode none/chain/aligned, orientation, gap, maxElementsWrap, style, bias). Not yet available: flow_horizontalAlign/verticalAlign, circular positioning
+- `RecyclerView`, `ListView`, `GridView`, `ViewPager` (sample content from `tools:listitem`)
 - `TabLayout`, `BottomNavigationView`, `FloatingActionButton`, `TextInputLayout`, `Chip`, `DrawerLayout`, `AppBarLayout`
-- `MaterialButton`, `CardView`, `MaterialCardView`, serta `srcCompat` dan tint
-- View custom digambar sebagai class induknya; fragment menampilkan layout yang di-inflate
-- `VideoView` dan ExoPlayer/Media3 `PlayerView` memutar video asli (hanya HTTPS, `res/raw`, atau `assets`)
-- Picture-in-picture ditiru bila manifest berisi `android:supportsPictureInPicture="true"` (tampilan saja, video tidak diputar)
+- `MaterialButton`, `CardView`, `MaterialCardView`, as well as `srcCompat` and tint
+- Custom views are drawn as their parent class; fragments show the inflated layout
+- `VideoView` and ExoPlayer/Media3 `PlayerView` play real video (HTTPS, `res/raw`, or `assets` only)
+- Picture-in-picture is imitated if the manifest contains `android:supportsPictureInPicture="true"` (display only, the video is not played)
 
-**Contoh** `app/src/main/res/layout/activity_main.xml`:
+**Example** `app/src/main/res/layout/activity_main.xml`:
 
 ```xml
 <?xml version="1.0" encoding="utf-8"?>
@@ -601,76 +601,76 @@ Widget yang tidak bisa di-inflate langsung diganti versi preview yang membaca at
     android:orientation="vertical"
     android:padding="16dp">
 
-    <!-- tools:text hanya tampil di preview dan hanya mengisi yang kosong -->
+    <!-- tools:text is only shown in the preview and only fills in empty ones -->
     <TextView
         android:id="@+id/title"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:textSize="24sp"
-        tools:text="Halo Studio Mobile" />
+        tools:text="Hello Studio Mobile" />
 
     <Button
         android:id="@+id/btnNext"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:text="Buka layar kedua" />
+        android:text="Open second screen" />
 </LinearLayout>
 ```
 
-**Pindah layar di preview.** Bila `MainActivity` berisi kode berikut, menyentuh tombol di preview membuka `SecondActivity`. Tombol Back di navigation bar preview kembali ke layar sebelumnya:
+**Navigating between screens in the preview.** If `MainActivity` contains the following code, touching the button in the preview opens `SecondActivity`. The Back button in the preview's navigation bar returns to the previous screen:
 
 ```java
 findViewById(R.id.btnNext).setOnClickListener(v ->
         startActivity(new Intent(this, SecondActivity.class)));
 ```
 
-### Preview WebView
+### WebView preview
 
-Halaman di `assets/` dimuat di WebView asli. Perilakunya mengikuti kode project, seperti di perangkat:
+Pages in `assets/` are loaded in a real WebView. Its behavior follows the project's code, as on a device:
 
-- JavaScript dan DOM storage **hanya aktif bila kode menyalakannya** (`setJavaScriptEnabled(true)`, `setDomStorageEnabled(true)`)
-- Bila kode memuat `file:///android_asset/...`, preview memakai skema yang sama, sehingga `fetch()` ke file lokal gagal seperti di perangkat
-- Autoplay media hanya jalan bila kode memanggil `setMediaPlaybackRequiresUserGesture(false)`
-- Halaman `http://` (tanpa S) **tidak dimuat**; preview menjelaskan alasannya. Pakai HTTPS
-- `.jsx`, `.tsx`, `.ts` diubah ke `.js` otomatis. Import relatif (`./App`), `import './style.css'`, dan `import data from './data.json'` ikut dilayani
+- JavaScript and DOM storage are **only active if the code turns them on** (`setJavaScriptEnabled(true)`, `setDomStorageEnabled(true)`)
+- If the code loads `file:///android_asset/...`, the preview uses the same scheme, so `fetch()` to local files fails just as on a device
+- Media autoplay only works if the code calls `setMediaPlaybackRequiresUserGesture(false)`
+- `http://` pages (without S) are **not loaded**; the preview explains why. Use HTTPS
+- `.jsx`, `.tsx`, `.ts` are converted to `.js` automatically. Relative imports (`./App`), `import './style.css'`, and `import data from './data.json'` are also served
 
-**Contoh** `app/src/main/assets/index.html`:
+**Example** `app/src/main/assets/index.html`:
 
 ```html
 <!doctype html>
 <html>
   <head>
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Halo</title>
+    <title>Hello</title>
   </head>
   <body>
-    <h1>Halo dari WebView</h1>
-    <button onclick="document.body.style.background='#cde'">Ubah warna</button>
+    <h1>Hello from WebView</h1>
+    <button onclick="document.body.style.background='#cde'">Change color</button>
   </body>
 </html>
 ```
 
-**Contoh** `MainActivity.java` yang memuatnya:
+**Example** `MainActivity.java` that loads it:
 
 ```java
 WebView web = findViewById(R.id.web);
-web.getSettings().setJavaScriptEnabled(true);   // tanpa ini JS mati, di preview maupun di HP
+web.getSettings().setJavaScriptEnabled(true);   // without this JS is off, in the preview and on the phone
 web.loadUrl("file:///android_asset/index.html");
 ```
 
-### Preview mengikuti perubahan
+### Preview follows changes
 
-Preview dibangun dari isi file di disk saat itu. Bila asisten AI mengubah file lewat MCP, preview yang sedang terbuka ikut diperbarui. Tombol Refresh memuat ulang manual.
+The preview is built from the file contents on disk at that moment. If an AI assistant changes a file through MCP, the preview that is currently open is updated too. The Refresh button reloads it manually.
 
 ---
 
-## Dependensi, Repository URL, dan JitPack
+## Dependencies, Repository URL, and JitPack
 
-Library diambil dari repository Maven yang **dideklarasikan di project**, ditambah **Google Maven** dan **Maven Central** sebagai cadangan (project yang tidak menuliskannya tetap jalan), atau dari `libs/*.jar`. Library yang belum ada di cache gagal bila HP offline.
+Libraries are fetched from the Maven repositories **declared in the project**, plus **Google Maven** and **Maven Central** as a fallback (projects that do not write them still work), or from `libs/*.jar`. Libraries that are not yet in the cache fail if the phone is offline.
 
-Studio Mobile membaca blok `repositories { }` dari `settings.gradle(.kts)`, `build.gradle(.kts)` di root, lalu tiap modul, sesuai urutan itu.
+Studio Mobile reads the `repositories { }` block from `settings.gradle(.kts)`, the root `build.gradle(.kts)`, then each module, in that order.
 
-### Contoh: JitPack (Groovy)
+### Example: JitPack (Groovy)
 
 `settings.gradle`:
 
@@ -688,12 +688,12 @@ dependencyResolutionManagement {
 
 ```groovy
 dependencies {
-    // format JitPack: com.github.<user>:<repo>:<tag atau commit>
+    // JitPack format: com.github.<user>:<repo>:<tag or commit>
     implementation 'com.github.bumptech:glide:v4.16.0'
 }
 ```
 
-### Contoh: JitPack (Kotlin DSL)
+### Example: JitPack (Kotlin DSL)
 
 ```kotlin
 // settings.gradle.kts
@@ -711,9 +711,9 @@ dependencies {
 }
 ```
 
-### Contoh: repository URL lain
+### Example: other repository URLs
 
-Semua bentuk di bawah ini dikenali:
+All of the forms below are recognized:
 
 ```groovy
 maven { url 'https://repo.example.com/releases' }
@@ -723,9 +723,9 @@ maven("https://repo.example.com/releases")
 maven(url = "https://repo.example.com/releases")
 ```
 
-### Contoh: batasi repository dengan `content`
+### Example: restrict repositories with `content`
 
-Supaya JitPack hanya dipakai untuk grup tertentu (lebih cepat dan lebih aman):
+So that JitPack is only used for certain groups (faster and safer):
 
 ```groovy
 repositories {
@@ -741,62 +741,62 @@ repositories {
 }
 ```
 
-Filter yang dikenali: `includeGroup`, `includeGroupAndSubgroups`, `includeGroupByRegex`, `includeModule`, bentuk `exclude...` yang sepadan, dan `exclusiveContent { forRepository { ... } filter { ... } }`.
+Recognized filters: `includeGroup`, `includeGroupAndSubgroups`, `includeGroupByRegex`, `includeModule`, the equivalent `exclude...` forms, and `exclusiveContent { forRepository { ... } filter { ... } }`.
 
-### Yang tidak didukung (akan muncul sebagai peringatan di log build)
+### Not supported (will appear as warnings in the build log)
 
-| Deklarasi | Perlakuan |
+| Declaration | Handling |
 |---|---|
-| `http://...` | **Diblokir demi keamanan**, dilewati. Hanya **HTTPS** ([alasannya](#keamanan-jaringan-http-diblokir-hanya-https)) |
-| Alamat dari variabel, misalnya `url "$repoUrl"` | Dilewati. Tulis alamat sebagai teks biasa |
-| `credentials { ... }` | Repository tetap dicoba **tanpa** kredensial, jadi hanya file publik yang bisa diunduh |
-| `flatDir`, `ivy` | Dilewati (bukan repository Maven) |
-| `mavenLocal()` | Dilewati (tidak ada di HP) |
-| Versi `SNAPSHOT` | Tidak didukung, pakai versi rilis |
-| `oss.sonatype.org` | Sudah dipensiunkan Sonatype (2025). Pakai Maven Central |
-| `jcenter()` | Sudah ditutup. Dipakai hanya bila repository sebelumnya tidak punya file itu |
+| `http://...` | **Blocked for security**, skipped. **HTTPS** only ([why](#network-security-http-blocked-https-only)) |
+| Addresses from variables, for example `url "$repoUrl"` | Skipped. Write the address as plain text |
+| `credentials { ... }` | The repository is still tried **without** credentials, so only public files can be downloaded |
+| `flatDir`, `ivy` | Skipped (not Maven repositories) |
+| `mavenLocal()` | Skipped (does not exist on the phone) |
+| `SNAPSHOT` versions | Not supported, use a release version |
+| `oss.sonatype.org` | Retired by Sonatype (2025). Use Maven Central |
+| `jcenter()` | Already shut down. Used only if the preceding repositories do not have the file |
 
-Catatan: JitPack harus **dideklarasikan** di project, tidak aktif otomatis seperti Google dan Maven Central. Build pertama sebuah library JitPack bisa lama karena JitPack membuild dari sumbernya di sisi server.
+Note: JitPack must be **declared** in the project; it is not active automatically like Google and Maven Central. The first build of a JitPack library can take a long time because JitPack builds from the source on the server side.
 
-### Verifikasi file library (SHA-1 dan SHA-256)
+### Library file verification (SHA-1 and SHA-256)
 
-Setiap file library yang diunduh diperiksa sebelum dipakai:
+Every downloaded library file is checked before being used:
 
-1. **SHA-1 dari repository.** File dibandingkan dengan `.sha1` yang diterbitkan repository di sebelahnya. Tidak cocok berarti file **tidak dipakai**.
-2. **Tanpa `.sha1` dan tanpa pin, file ditolak.** Studio Mobile menolak memakai file yang tidak bisa diverifikasi (pesan *"File cannot be verified"*).
-3. **Pin SHA-256 buatan Anda (disarankan).** SHA-1 dari server berasal dari server yang sama dengan filenya, jadi tidak membuktikan bahwa itu file yang Anda maksud. Pin SHA-256 berasal dari *luar* server (misalnya halaman rilis) dan **menentukan sendiri**: bila ada pin, `.sha1` server tidak diperlukan dan file yang tidak cocok tidak pernah dipakai, dari repository mana pun.
+1. **SHA-1 from the repository.** The file is compared with the `.sha1` that the repository publishes next to it. A mismatch means the file is **not used**.
+2. **Without a `.sha1` and without a pin, the file is rejected.** Studio Mobile refuses to use files that cannot be verified (message *"File cannot be verified"*).
+3. **A SHA-256 pin that you create (recommended).** The SHA-1 from the server comes from the same server as the file, so it does not prove that it is the file you intended. A SHA-256 pin comes from *outside* the server (for example a release page) and **is decided by you**: if a pin exists, the server's `.sha1` is not needed and a file that does not match is never used, from any repository.
 
-Pin ditulis di `gradle/checksums.properties` di root project, satu baris per library, format `group:artifact:version=SHA-256`:
+Pins are written in `gradle/checksums.properties` at the project root, one line per library, in the format `group:artifact:version=SHA-256`:
 
 ```properties
 # gradle/checksums.properties
-# SHA-256 dari file utama library (.jar, atau .aar untuk library Android).
-# Salin dari halaman rilis. Nilai di bawah hanya contoh bentuk, BUKAN hash asli.
+# SHA-256 of the library's main file (.jar, or .aar for Android libraries).
+# Copy from the release page. The values below are only an example of the form, NOT real hashes.
 
-# Library dari JitPack
+# Library from JitPack
 com.github.User:Repo:1.0.0=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 
-# Awalan "sha256:" boleh dipakai
+# The "sha256:" prefix may be used
 com.github.Other:Lib:2.3.1=sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 ```
 
-Aturan file pin:
+Pin file rules:
 
-| Aturan | Keterangan |
+| Rule | Description |
 |---|---|
-| Baris | `group:artifact:version=nilai`, tepat 3 bagian sebelum `=` |
-| Nilai | Tepat **64 karakter heksadesimal** (huruf besar atau kecil, otomatis dijadikan huruf kecil) |
-| Komentar | Diawali `#`, boleh di baris sendiri atau di akhir baris |
-| Duplikat | Library yang sama dengan dua nilai berbeda ditolak |
-| Salah format | Build berhenti dengan pesan baris mana yang salah |
-| Cache | Pin yang ditambahkan setelah file ada di cache tetap diperiksa; file cache yang tidak cocok dihapus |
+| Line | `group:artifact:version=value`, exactly 3 parts before the `=` |
+| Value | Exactly **64 hexadecimal characters** (upper or lower case, automatically converted to lower case) |
+| Comments | Start with `#`, may be on their own line or at the end of a line |
+| Duplicates | The same library with two different values is rejected |
+| Wrong format | The build stops with a message saying which line is wrong |
+| Cache | A pin added after the file is already in the cache is still checked; a cached file that does not match is deleted |
 
-Build yang memakai pin menandai library itu dengan `[SHA-256 pinned]` di log.
+A build that uses a pin marks that library with `[SHA-256 pinned]` in the log.
 
-**Cara mendapatkan SHA-256**
+**How to get the SHA-256**
 
-- Dari halaman rilis library (cara terbaik, karena nilainya datang dari sumber lain)
-- Hitung sendiri dari file yang Anda unduh dan percayai:
+- From the library's release page (the best way, because the value comes from another source)
+- Calculate it yourself from a file you downloaded and trust:
 
 ```bash
 # Linux / Termux
@@ -809,7 +809,7 @@ shasum -a 256 library-1.0.0.aar
 certutil -hashfile library-1.0.0.aar SHA256
 ```
 
-- Atau biarkan Studio Mobile menunjukkannya. Bila library belum dipin dan repository tidak menerbitkan `.sha1`, build gagal dan log memuat baris siap tempel:
+- Or let Studio Mobile show it. If the library has not been pinned and the repository does not publish a `.sha1`, the build fails and the log contains a ready-to-paste line:
 
 ```
 Library: com.github.User:Repo:1.0.0
@@ -825,301 +825,301 @@ Compare it with the SHA-256 on the release page. If it is the same, add this lin
 com.github.User:Repo:1.0.0=9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08
 ```
 
-> **Jangan menempel baris itu begitu saja.** Bandingkan dulu nilainya dengan SHA-256 di halaman rilis. Bila berbeda, file mungkin sudah diubah dan **jangan dipakai**.
+> **Do not just paste that line.** First compare the value with the SHA-256 on the release page. If it differs, the file may have been altered and **should not be used**.
 
-Contoh kegagalan saat pin tidak cocok:
+Example of a failure when the pin does not match:
 
 ```
 SHA-256 of Repo-1.0.0.aar (com.github.User:Repo:1.0.0) from https://jitpack.io/ does not match gradle/checksums.properties.
-Expected <nilai di pin>, received <nilai file yang diunduh>. The file was not used.
+Expected <value in the pin>, received <value of the downloaded file>. The file was not used.
 ```
 
-Bila library belum dipin tetapi `.sha1` server ada dan cocok, build tetap jalan dan log memberi **peringatan** berisi SHA-256 serta baris yang bisa ditambahkan ke `gradle/checksums.properties`, karena SHA-1 dari server saja tidak membuktikan bahwa itu file yang Anda harapkan.
+If the library has not been pinned but the server's `.sha1` exists and matches, the build still runs and the log gives a **warning** containing the SHA-256 and the line that can be added to `gradle/checksums.properties`, because the server's SHA-1 alone does not prove that it is the file you expect.
 
-Pin ini dibaca oleh resolver **build lokal**. Build Gradle + JDK memakai Gradle sungguhan dengan mekanisme verifikasinya sendiri.
+These pins are read by the **local build** resolver. The Gradle + JDK build uses real Gradle with its own verification mechanism.
 
-### Keamanan unduhan
+### Download security
 
-- Semua unduhan komponen (NDK, JDK, Python, Dart, Gradle) memakai **HTTPS dan diverifikasi SHA-256**
-- Catalog tool dipin dengan hash di dalam aplikasi (contoh: `tools/dart-sdk.json` memuat `"sha256": "a467fe1d..."` untuk Dart SDK)
-- Ekstraksi ZIP/TAR dilindungi dari zip-slip dan zip bomb
-- Import ZIP berpassword (ZipCrypto dan AES) memunculkan dialog password
+- All component downloads (NDK, JDK, Python, Dart, Gradle) use **HTTPS and are SHA-256 verified**
+- The tool catalog is pinned with hashes inside the app (example: `tools/dart-sdk.json` contains `"sha256": "a467fe1d..."` for the Dart SDK)
+- ZIP/TAR extraction is protected from zip-slip and zip bombs
+- Importing a password-protected ZIP (ZipCrypto and AES) shows a password dialog
 
 ---
 
-## Keamanan jaringan: HTTP diblokir, hanya HTTPS
+## Network security: HTTP blocked, HTTPS only
 
-Studio Mobile **tidak mengizinkan HTTP biasa (`http://`)**. Semua koneksi harus memakai **HTTPS (`https://`)**. Ini disengaja demi keamanan: lewat HTTP, pihak di tengah jaringan (Wi-Fi publik, router, penyedia internet) bisa membaca atau **mengubah** file yang lewat. Untuk IDE yang membuat aplikasi, library yang diubah di jalan bisa menyisipkan kode berbahaya ke APK Anda.
+Studio Mobile **does not allow plain HTTP (`http://`)**. All connections must use **HTTPS (`https://`)**. This is intentional for security: over HTTP, a party in the middle of the network (public Wi-Fi, router, internet provider) can read or **alter** files that pass through. For an IDE that builds apps, a library altered on the way could insert malicious code into your APK.
 
-Di mana aturan ini berlaku:
+Where this rule applies:
 
-| Bagian | Perilaku bila `http://` |
+| Part | Behavior when `http://` |
 |---|---|
-| Repository Maven di `build.gradle` / `settings.gradle` | **Dilewati** dengan peringatan *"is not HTTPS; only HTTPS repositories are supported. Skipped."* |
-| Redirect dari repository | Hanya diikuti bila tujuannya **HTTPS**, maksimal 3 kali |
-| Unduhan komponen (NDK, JDK, Python, Dart, Gradle) | Hanya HTTPS, plus verifikasi SHA-256 |
-| Relay URL di layar MCP | **Ditolak** (*"Enter a valid https:// relay address"*) |
-| Halaman yang dimuat di Preview (`loadUrl("http://...")`) | **Tidak dimuat**; preview menjelaskan alasannya |
-| Video di Preview | Hanya HTTPS |
-| Aplikasi Studio Mobile sendiri | `usesCleartextTraffic="false"` di manifest |
+| Maven repositories in `build.gradle` / `settings.gradle` | **Skipped** with the warning *"is not HTTPS; only HTTPS repositories are supported. Skipped."* |
+| Redirects from a repository | Only followed if the destination is **HTTPS**, at most 3 times |
+| Component downloads (NDK, JDK, Python, Dart, Gradle) | HTTPS only, plus SHA-256 verification |
+| Relay URL on the MCP screen | **Rejected** (*"Enter a valid https:// relay address"*) |
+| Pages loaded in Preview (`loadUrl("http://...")`) | **Not loaded**; the preview explains why |
+| Video in Preview | HTTPS only |
+| The Studio Mobile app itself | `usesCleartextTraffic="false"` in the manifest |
 
-Pemeriksaan tambahan pada koneksi HTTPS:
+Additional checks on HTTPS connections:
 
-- Nama host dikirim sebagai SNI dan **sertifikat server harus valid untuk nama host itu**. Sertifikat yang hanya cocok untuk alamat IP atau nama lain ditolak
-- DNS diselesaikan lewat Google DNS lalu Cloudflare DNS, bukan DNS bawaan HP. Bila tidak ada jawaban DNS sama sekali, unduhan berhenti
+- The host name is sent as SNI and the **server certificate must be valid for that host name**. A certificate that only matches an IP address or another name is rejected
+- DNS is resolved through Google DNS and then Cloudflare DNS, not the phone's built-in DNS. If there is no DNS answer at all, the download stops
 
-**Contoh perbaikan**
+**Example fix**
 
 ```groovy
-// Diblokir: http
+// Blocked: http
 maven { url 'http://repo.example.com/releases' }
 
-// Benar: https
+// Correct: https
 maven { url 'https://repo.example.com/releases' }
 ```
 
-Bila server repository Anda hanya menyediakan HTTP, pilihannya: pindahkan ke HTTPS, atau unduh file `.jar` / `.aar` dari sumber tepercaya lalu taruh di `app/libs/`. Bandingkan SHA-256 file itu dengan yang diterbitkan sumbernya sebelum memakainya.
+If your repository server only provides HTTP, the options are: move it to HTTPS, or download the `.jar` / `.aar` file from a trusted source and put it in `app/libs/`. Compare the SHA-256 of that file with the one published by its source before using it.
 
-Catatan: aturan ini berlaku untuk Studio Mobile. Untuk aplikasi buatan Anda sendiri, izin lalu lintas HTTP diatur di manifest dan kode aplikasi itu.
+Note: this rule applies to Studio Mobile. For apps you build yourself, permission for HTTP traffic is set in that app's manifest and code.
 
 ---
 
 ## Debug Mode
 
-Debug Mode menangkap **crash aplikasi hasil build** dan menampilkannya langsung di layar, sehingga aplikasi tidak menutup diam-diam. Log bisa disalin lalu dikirim ke asisten AI.
+Debug Mode catches **crashes of the built app** and shows them directly on screen, so the app does not close silently. The log can be copied and then sent to an AI assistant.
 
-### Cara menyalakan
+### How to turn it on
 
-**Dari aplikasi:** buka project di editor → menu **Debug Mode** → nyalakan **Enable Debug Mode**.
+**From the app:** open the project in the editor → **Debug Mode** menu → turn on **Enable Debug Mode**.
 
-**Dari AI lewat MCP:** panggil tool `set_debug_mode`.
+**From an AI through MCP:** call the `set_debug_mode` tool.
 
 ```json
 { "name": "set_debug_mode", "arguments": { "enabled": true } }
 ```
 
-Tanpa argumen `enabled`, tool hanya melaporkan status saat ini. Bawaannya **mati**. Pengaturan ini berlaku di aplikasi Studio Mobile, bukan per project, dan tidak bisa diubah bila MCP dalam mode read-only.
+Without the `enabled` argument, the tool only reports the current status. The default is **off**. This setting applies in the Studio Mobile app, not per project, and cannot be changed if MCP is in read-only mode.
 
-### Cara kerja
+### How it works
 
-1. Saat build, Studio Mobile menyalin project ke folder build sementara.
-2. Di **salinan itu saja** (file project Anda tidak berubah) ditambahkan dua class dan dua entri manifest:
-   - `StudioDebugProvider`: sebuah `ContentProvider` dengan authority `<applicationId>.studiodebug`. Android membuatnya sebelum `Application.onCreate()`, jadi penangkap crash terpasang lebih dulu daripada kode aplikasi.
-   - `StudioCrashActivity`: halaman putih layar penuh di proses terpisah (`:studio_debug`), sehingga tetap hidup setelah proses aplikasi dimatikan.
-3. Saat terjadi exception yang tidak tertangani, stack trace disimpan dan halaman **"The app crashed"** muncul.
-4. Tekan **Copy log**, lalu tempel ke asisten AI. Tekan **Close** untuk menutup.
+1. During the build, Studio Mobile copies the project to a temporary build folder.
+2. In **that copy only** (your project files are not changed), two classes and two manifest entries are added:
+   - `StudioDebugProvider`: a `ContentProvider` with the authority `<applicationId>.studiodebug`. Android creates it before `Application.onCreate()`, so the crash catcher is installed before the app's code.
+   - `StudioCrashActivity`: a full-screen white page in a separate process (`:studio_debug`), so it stays alive after the app's process is killed.
+3. When an unhandled exception occurs, the stack trace is saved and the **"The app crashed"** page appears.
+4. Press **Copy log**, then paste it to an AI assistant. Press **Close** to close.
 
-Contoh isi alur: aplikasi memanggil `Integer.parseInt("abc")` → halaman crash menampilkan `java.lang.NumberFormatException: For input string: "abc"` lengkap dengan stack trace dan baris kode penyebab.
+Example flow: the app calls `Integer.parseInt("abc")` → the crash page shows `java.lang.NumberFormatException: For input string: "abc"` complete with the stack trace and the line of code that caused it.
 
-### Penting sebelum membagikan aplikasi
+### Important before sharing the app
 
-> **Matikan Debug Mode sebelum APK/AAB dibagikan atau diunggah.** Dengan Debug Mode menyala, aplikasi hasil build memuat halaman crash dan log stack trace. Aplikasi untuk rilis harus dibuild dengan Debug Mode mati.
+> **Turn off Debug Mode before the APK/AAB is shared or uploaded.** With Debug Mode on, the built app includes the crash page and stack trace log. An app for release must be built with Debug Mode off.
 
-### Batasan
+### Restrictions
 
-- Menangkap crash dari exception Java/Kotlin yang tidak tertangani. Crash native (C/C++) atau aplikasi yang membeku (ANR) mungkin tidak tertangkap. Bila log kosong, minta AI menganalisis lebih lanjut dengan Build Error Logs
-- Bila `AndroidManifest.xml` tidak punya elemen `<application>` atau package name tidak bisa ditentukan, Debug Mode dilewati dan alasannya ditulis di log build
-- Ini tidak sama dengan **Build Error Logs**, yaitu log kegagalan *saat build*. Debug Mode untuk crash *saat aplikasi berjalan*
+- Catches crashes from unhandled Java/Kotlin exceptions. Native (C/C++) crashes or a frozen app (ANR) may not be caught. If the log is empty, ask the AI to analyze further with Build Error Logs
+- If `AndroidManifest.xml` has no `<application>` element or the package name cannot be determined, Debug Mode is skipped and the reason is written in the build log
+- This is not the same as **Build Error Logs**, which are failure logs *during the build*. Debug Mode is for crashes *while the app is running*
 
-### Debug Mode untuk Studio Mobile sendiri
+### Debug Mode for Studio Mobile itself
 
-Bagian di atas untuk aplikasi **hasil build**. Studio Mobile juga punya penangkap crash untuk **dirinya sendiri**: nyalakan atau matikan di **Settings** (bawaannya **menyala**).
+The section above is for the **built** app. Studio Mobile also has a crash catcher for **itself**: turn it on or off in **Settings** (the default is **on**).
 
-- Terpasang sebelum `Application.onCreate()`, sehingga crash di mana pun ikut tertangkap: editor, compiler, unduhan dependensi, dan proses `:javarun`
-- Stack trace disimpan dan ditampilkan di halaman layar penuh pada proses terpisah
-- Penutupan yang tidak bisa dilihat handler Java (sistem mematikan aplikasi karena memori, crash native, ANR) dipulihkan saat aplikasi dibuka lagi lewat `ApplicationExitInfo`, **Android 11 ke atas**
-
----
-
-## Wallpaper editor (foto dan video live)
-
-Buka dari **Settings → Change Wallpaper**. Gambar atau video tampil di belakang **code editor**.
-
-**Foto**
-
-- Dipilih dari galeri; bila HP tidak punya aplikasi galeri, dipakai pemilih file
-- Dikecilkan hingga sisi terpanjang maksimal 2048 px, rotasi EXIF diterapkan, lalu disimpan sebagai JPEG kualitas 90 di penyimpanan privat aplikasi. Wallpaper tetap jalan walau file aslinya dipindah atau izinnya hilang
-
-**Video live**
-
-- Tombol **Choose video**. Durasi maksimal **60 detik** (toleransi 0,5 detik) dan ukuran file maksimal 500 MB. Video lebih panjang ditolak dengan pesan *"The video is longer than 60 seconds. Choose a shorter one."*
-- Diputar **tanpa suara** dan **berulang terus**; tidak mengambil audio focus, jadi musik yang sedang diputar tidak terganggu
-- Hanya diputar di **code editor**. Berhenti di Home, Preview, dan Build, serta jeda saat Anda keluar dari aplikasi, lalu lanjut dari posisi terakhir saat kembali
-- Frame pertama disimpan sebagai gambar diam dan dipakai sebagai pratinjau serta tampilan awal sebelum video siap
-
-**Pengaturan**
-
-- Slider **Darkness** 0 sampai 85% (bawaan 55%): lapisan biru malam di atas gambar supaya kode tetap terbaca di atas gambar yang terang
-- Tombol **Remove** menghapus wallpaper. Hanya satu wallpaper aktif: memilih foto menggantikan video, dan sebaliknya
+- Installed before `Application.onCreate()`, so crashes anywhere are caught: the editor, the compiler, dependency downloads, and the `:javarun` process
+- The stack trace is saved and shown on a full-screen page in a separate process
+- Terminations that the Java handler cannot see (the system kills the app because of memory, a native crash, ANR) are recovered when the app is opened again through `ApplicationExitInfo`, on **Android 11 and above**
 
 ---
 
-## Keystore dan signing key
+## Editor wallpaper (photo and live video)
 
-Setiap aplikasi harus ditandatangani sebelum bisa dipasang. Studio Mobile memakai **satu key per project**, dan key itu dipakai untuk APK dan AAB project tersebut.
+Open from **Settings → Change Wallpaper**. The image or video appears behind the **code editor**.
 
-### Keystore bawaan (default)
+**Photo**
 
-Project yang belum diberi key sendiri ditandatangani dengan **key bawaan Studio Mobile**.
+- Chosen from the gallery; if the phone has no gallery app, a file picker is used
+- Scaled down so the longest side is at most 2048 px, EXIF rotation is applied, then saved as a quality-90 JPEG in the app's private storage. The wallpaper keeps working even if the original file is moved or its permission is lost
 
-- Dibuat otomatis saat aplikasi pertama kali dibuka (file `studio-mobile-debug.p12`, alias `studio-mobile-debug`, tipe PKCS12)
-- Key ini **sama untuk semua pemakai Studio Mobile**, dan sandinya sudah tertanam di aplikasi, jadi siapa pun bisa menandatangani dengan key yang sama
-- Cocok untuk **uji coba di HP sendiri**. **Jangan dipakai untuk rilis** ke Google Play atau dibagikan ke orang lain
-- Di halaman Keystore, tipenya tampil sebagai **Studio Mobile default**
-- Build Gradle untuk project tanpa key sendiri memakai signing bawaan Gradle/AGP, bukan key bawaan Studio Mobile ini
+**Live video**
 
-### Keystore sendiri (own key)
+- **Choose video** button. Maximum duration **60 seconds** (0.5 second tolerance) and maximum file size 500 MB. A longer video is rejected with the message *"The video is longer than 60 seconds. Choose a shorter one."*
+- Played **without sound** and **on a continuous loop**; it does not take audio focus, so music that is playing is not disturbed
+- Only played in the **code editor**. It stops on Home, Preview, and Build, and pauses when you leave the app, then resumes from the last position when you come back
+- The first frame is saved as a still image and used as the thumbnail and initial display before the video is ready
 
-Key sendiri disimpan per project dan tampil di halaman Keystore sebagai **Own key**. Ada dua cara mendapatkannya: membuat baru atau mengimpor `.p12` yang sudah ada.
+**Settings**
 
-**Membuka halaman Keystore:** di daftar project di Home, tekan **⋮** pada project → **Keystore**.
-
-Halaman Keystore menampilkan nama key, tipe, alias, store password dan key password (disembunyikan, tekan **Show** untuk melihat), pemilik (owner), tanggal berlaku, dan sidik jari SHA-256.
-
-| Tombol | Fungsi |
-|---|---|
-| **Copy** | Menyalin detail key ke clipboard: nama, alias, kedua sandi, owner, tanggal berlaku, SHA-256, SHA-1, dan isi keystore dalam Base64. Di Android 13+ clipboard ditandai sensitif supaya tidak muncul di pratinjau keyboard |
-| **Import** | Mengimpor file keystore **`.p12` (PKCS12)**. Isi dulu alias, store password, dan key password (boleh kosong bila sama dengan store password), lalu pilih file. Alias dan sandi diperiksa lebih dulu; bila salah, key tidak diganti |
-| **Export** | Menyimpan key sebagai file `.p12` ke lokasi pilihanmu. Alias dan sandi diperiksa dulu sebelum file disimpan. Key bawaan diekspor sebagai `<nama project>-debug.p12` |
-| **Change Key** | Membuat key baru untuk project ini (lihat di bawah) |
-
-**Membuat key baru (Change Key)**
-
-| Kolom | Aturan |
-|---|---|
-| Alias | Wajib |
-| Password dan konfirmasi | Wajib, minimal **6 karakter**, dan keduanya harus sama |
-| Company (CN) | Wajib |
-| Organization (O) | Wajib |
-| Unit (OU), City, State | Boleh kosong |
-| Country | Wajib, **2 huruf** (kode negara, misalnya `ID`) |
-
-Key yang dibuat memakai RSA 2048 bit dan berlaku **30 tahun**, sehingga memenuhi syarat masa berlaku minimal Google Play (2033).
-
-> **Peringatan:** aplikasi yang sudah terpasang dan ditandatangani key lama **tidak bisa diperbarui** oleh versi yang ditandatangani key baru. Pengguna harus mencopot pemasangan lama lebih dulu. Untuk aplikasi yang sudah dirilis, **jangan ganti key**.
-
-### Perlindungan layar (FLAG_SECURE)
-
-Halaman Keystore menampilkan sandi dan isi key, jadi Studio Mobile memasang flag keamanan Android **`FLAG_SECURE`** untuk mencegah tangkapan layar dan perekaman layar:
-
-| Bagian | Perlindungan |
-|---|---|
-| Halaman **Keystore** | `FLAG_SECURE` menyala begitu halaman dibuka, dan **dimatikan lagi** saat pindah ke layar lain. Layar lain (editor, build, dan lainnya) tetap bisa di-screenshot seperti biasa |
-| Dialog **Import** dan **Export** key (alias dan sandi) | Dilindungi |
-| Form **Change Key** (membuat key baru), termasuk saat dipanggil dari Export AAB | Dilindungi |
-| Dialog **Key changed** setelah key dibuat dari Export AAB | Dilindungi |
-
-Akibatnya: screenshot gagal atau menampilkan layar hitam, rekaman layar menampilkan layar hitam, dan pratinjau aplikasi di daftar aplikasi terbaru (*recents*) tidak menampilkan isi halaman.
-
-Batasannya perlu kamu tahu:
-
-- Flag ini **tidak menghalangi foto layar dengan kamera** atau orang yang melihat dari belakang bahu
-- Tombol **Copy** tetap menaruh sandi dan isi keystore di clipboard. Di Android 13+ clipboard ditandai sensitif, tetapi aplikasi lain yang punya akses clipboard tetap bisa membacanya. Kosongkan clipboard setelah dipakai
-- File `.p12` hasil **Export** adalah file biasa di lokasi yang kamu pilih, di luar perlindungan flag ini. Simpan di tempat aman
-
-### Export AAB dan key
-
-Google Play butuh key milik developer. Saat memilih **Export AAB** (menu **⋮** project):
-
-- Bila project masih memakai key bawaan, form pembuatan key muncul lebih dulu. Setelah key dibuat, ada pilihan **Export AAB** atau **Import** key lain
-- Bila project sudah punya key sendiri, build AAB langsung dimulai
-- Hasilnya disimpan di `Studio Mobile/Export AAB/<nama app>.aab`
-
-Cara key dipakai tiap engine: build lokal menandatangani dengan key project; build Gradle menerima key yang sama lewat properti signing sementara (lihat [Gradle dan AGP](#gradle-dan-agp)).
-
-### Tempat penyimpanan dan pencadangan
-
-- Key sendiri disimpan di penyimpanan **privat aplikasi** (`project-keys/<nama project>/`), bukan di folder `Studio Mobile/`
-- Mengganti nama project ikut memindahkan key-nya
-- **Menghapus project juga menghapus key-nya**, dan mencopot Studio Mobile menghapus semua key
-- **Cadangkan key sendiri** dengan tombol **Export**, lalu simpan file `.p12` dan sandinya di tempat aman. Key yang hilang berarti aplikasi di Google Play tidak bisa diperbarui lagi
+- **Darkness** slider 0 to 85% (default 55%): a midnight-blue layer over the image so the code stays readable over bright images
+- The **Remove** button deletes the wallpaper. Only one wallpaper is active: choosing a photo replaces the video, and vice versa
 
 ---
 
-## GitHub Build dan unduh repo ZIP
+## Keystore and signing key
 
-Fitur ini menjalankan **GitHub Actions** dari HP: Studio Mobile membaca workflow sebuah repo, kamu memilih branch dan input, workflow dijalankan di server GitHub, lalu hasilnya (misalnya APK) diunduh ke HP. Ada juga tombol untuk **mengunduh seluruh repo sebagai ZIP**.
+Every app must be signed before it can be installed. Studio Mobile uses **one key per project**, and that key is used for the APK and AAB of that project.
 
-Semua koneksi ke GitHub memakai **HTTPS** (`api.github.com`). Token tidak pernah dikirim ke alamat selain GitHub.
+### Built-in keystore (default)
+
+A project that has not been given its own key is signed with the **Studio Mobile built-in key**.
+
+- Created automatically when the app is first opened (file `studio-mobile-debug.p12`, alias `studio-mobile-debug`, type PKCS12)
+- This key is **the same for all Studio Mobile users**, and its password is embedded in the app, so anyone can sign with the same key
+- Suitable for **testing on your own phone**. **Do not use it for release** to Google Play or to share with other people
+- On the Keystore page, its type is shown as **Studio Mobile default**
+- Gradle builds for projects without their own key use the default Gradle/AGP signing, not this Studio Mobile built-in key
+
+### Own keystore (own key)
+
+Your own key is stored per project and appears on the Keystore page as **Own key**. There are two ways to get one: create a new one or import an existing `.p12`.
+
+**Opening the Keystore page:** in the project list on Home, tap **⋮** on the project → **Keystore**.
+
+The Keystore page shows the key name, type, alias, store password and key password (hidden, tap **Show** to see them), owner, validity dates, and SHA-256 fingerprint.
+
+| Button | Function |
+|---|---|
+| **Copy** | Copies the key details to the clipboard: name, alias, both passwords, owner, validity dates, SHA-256, SHA-1, and the keystore contents in Base64. On Android 13+ the clipboard is marked sensitive so it does not appear in the keyboard preview |
+| **Import** | Imports a **`.p12` (PKCS12)** keystore file. Fill in the alias, store password, and key password first (may be left empty if the same as the store password), then choose the file. The alias and passwords are checked first; if wrong, the key is not replaced |
+| **Export** | Saves the key as a `.p12` file to a location of your choice. The alias and passwords are checked before the file is saved. The built-in key is exported as `<project name>-debug.p12` |
+| **Change Key** | Creates a new key for this project (see below) |
+
+**Creating a new key (Change Key)**
+
+| Field | Rule |
+|---|---|
+| Alias | Required |
+| Password and confirmation | Required, at least **6 characters**, and both must be the same |
+| Company (CN) | Required |
+| Organization (O) | Required |
+| Unit (OU), City, State | May be empty |
+| Country | Required, **2 letters** (country code, for example `ID`) |
+
+The created key uses 2048-bit RSA and is valid for **30 years**, so it meets Google Play's minimum validity requirement (2033).
+
+> **Warning:** an app that is already installed and signed with the old key **cannot be updated** by a version signed with a new key. Users must uninstall the old one first. For an app that has already been released, **do not change the key**.
+
+### Screen protection (FLAG_SECURE)
+
+The Keystore page shows passwords and key contents, so Studio Mobile sets Android's **`FLAG_SECURE`** security flag to prevent screenshots and screen recording:
+
+| Part | Protection |
+|---|---|
+| **Keystore** page | `FLAG_SECURE` turns on as soon as the page is opened, and is **turned off again** when moving to another screen. Other screens (editor, build, and others) can still be screenshotted as usual |
+| Key **Import** and **Export** dialogs (alias and passwords) | Protected |
+| **Change Key** form (creating a new key), including when called from Export AAB | Protected |
+| **Key changed** dialog after a key is created from Export AAB | Protected |
+
+As a result: screenshots fail or show a black screen, screen recordings show a black screen, and the app preview in the recent apps list (*recents*) does not show the page contents.
+
+Limitations you need to know about:
+
+- This flag **does not prevent photographing the screen with a camera** or someone looking over your shoulder
+- The **Copy** button still puts the passwords and keystore contents on the clipboard. On Android 13+ the clipboard is marked sensitive, but other apps that have clipboard access can still read it. Clear the clipboard after use
+- The `.p12` file produced by **Export** is an ordinary file in the location you choose, outside the protection of this flag. Keep it in a safe place
+
+### Export AAB and key
+
+Google Play needs the developer's own key. When you choose **Export AAB** (project **⋮** menu):
+
+- If the project still uses the built-in key, the key creation form appears first. After the key is created, there is a choice of **Export AAB** or **Import** another key
+- If the project already has its own key, the AAB build starts right away
+- The result is saved at `Studio Mobile/Export AAB/<app name>.aab`
+
+How the key is used by each engine: the local build signs with the project key; the Gradle build receives the same key through temporary signing properties (see [Gradle and AGP](#gradle-and-agp)).
+
+### Storage location and backup
+
+- Your own key is stored in the app's **private** storage (`project-keys/<project name>/`), not in the `Studio Mobile/` folder
+- Renaming a project also moves its key
+- **Deleting a project also deletes its key**, and uninstalling Studio Mobile deletes all keys
+- **Back up your own key** with the **Export** button, then keep the `.p12` file and its passwords in a safe place. A lost key means the app on Google Play can no longer be updated
+
+---
+
+## GitHub Build and repo ZIP download
+
+This feature runs **GitHub Actions** from the phone: Studio Mobile reads a repo's workflows, you choose the branch and inputs, the workflow runs on GitHub's servers, and then the result (for example an APK) is downloaded to the phone. There is also a button to **download the whole repo as a ZIP**.
+
+All connections to GitHub use **HTTPS** (`api.github.com`). The token is never sent to any address other than GitHub.
 
 ### 1. Personal access token
 
-Saat pertama membuka GitHub Build, aplikasi meminta token. Tombol **Create token** membuka halaman pembuatan token di GitHub. Token dicek ke GitHub lebih dulu; bila ditolak, pesan error tampil di dialog dan token tidak disimpan. Token yang valid disimpan **terenkripsi** (AES-256-GCM, kunci di Android Keystore) hanya di HP ini. Tombol **Delete Token** di pojok kanan atas halaman Github Build menghapus token dan kuncinya.
+When you first open GitHub Build, the app asks for a token. The **Create token** button opens the token creation page on GitHub. The token is first checked with GitHub; if it is rejected, an error message appears in the dialog and the token is not saved. A valid token is stored **encrypted** (AES-256-GCM, key in the Android Keystore) only on this phone. The **Delete Token** button at the top right of the Github Build page deletes the token and its key.
 
-Dua jenis token didukung. Pilih salah satu.
+Two types of token are supported. Choose one.
 
-| | Fine-grained token (disarankan) | Classic token |
+| | Fine-grained token (recommended) | Classic token |
 |---|---|---|
-| Halaman | `github.com/settings/personal-access-tokens` | `github.com/settings/tokens` → *Tokens (classic)* |
-| Awalan token | `github_pat_...` | `ghp_...` |
-| Akses repo | Pilih **All repositories** atau **Only select repositories** | Semua repo yang bisa diakses akun |
-| Izin yang dibutuhkan | **Actions: Read and write** dan **Contents: Read-only** (Metadata: Read-only otomatis) | Scope **`repo`** (wajib). Scope `workflow` boleh dicentang tetapi tidak diperlukan untuk menjalankan workflow |
-| Cakupan | Satu pemilik saja (satu akun **atau** satu organisasi) | Semua akun dan organisasi tempat kamu menjadi anggota atau kolaborator |
-| Masa berlaku | Wajib punya tanggal kedaluwarsa | Bisa tanpa kedaluwarsa (tidak disarankan) |
+| Page | `github.com/settings/personal-access-tokens` | `github.com/settings/tokens` → *Tokens (classic)* |
+| Token prefix | `github_pat_...` | `ghp_...` |
+| Repo access | Choose **All repositories** or **Only select repositories** | All repos the account can access |
+| Required permissions | **Actions: Read and write** and **Contents: Read-only** (Metadata: Read-only is automatic) | **`repo`** scope (required). The `workflow` scope may be ticked but is not needed to run workflows |
+| Scope | One owner only (one account **or** one organization) | All accounts and organizations where you are a member or collaborator |
+| Validity | Must have an expiration date | Can have no expiration (not recommended) |
 
-Catatan penting:
+Important notes:
 
-- **Pilih izin seminimal mungkin.** Jangan mencentang scope seperti `delete_repo`, `admin:org`, atau `admin:enterprise`; Studio Mobile tidak memakainya. Beri tanggal kedaluwarsa dan hapus token di GitHub bila tidak dipakai lagi
-- **Jangan membagikan token** ke siapa pun, termasuk ke asisten AI atau lewat tangkapan layar
-- Tanpa **Contents (read)** (fine-grained), isi file workflow tidak bisa dibaca. Workflow tetap bisa dijalankan, tetapi **tanpa input**, dan halaman memberi catatan *"Inputs unavailable: the token needs Contents (read)"*
-- Token ditolak (error 401) berarti salah, kedaluwarsa, atau sudah dihapus. Hapus token di aplikasi lalu masukkan yang baru
-- Error 404 berarti alamat repo salah atau token tidak punya akses ke repo itu
+- **Choose the fewest permissions possible.** Do not tick scopes such as `delete_repo`, `admin:org`, or `admin:enterprise`; Studio Mobile does not use them. Set an expiration date and delete the token on GitHub when it is no longer used
+- **Do not share the token** with anyone, including with an AI assistant or through screenshots
+- Without **Contents (read)** (fine-grained), the workflow file contents cannot be read. Workflows can still be run, but **without inputs**, and the page gives the note *"Inputs unavailable: the token needs Contents (read)"*
+- A rejected token (error 401) means it is wrong, expired, or has been deleted. Delete the token in the app and enter a new one
+- Error 404 means the repo address is wrong or the token has no access to that repo
 
-### 2. Memilih repo
+### 2. Choosing a repo
 
-Halaman Github Build punya dua cara memilih repo.
+The Github Build page has two ways to choose a repo.
 
-**Daftar repo sendiri (dropdown)**
+**Your own repo list (dropdown)**
 
-Tombol **Select repository** membuka daftar repo yang bisa diakses token, diurutkan dari yang terakhir diubah, dengan kolom pencarian. Repo private diberi tanda 🔒. Daftar dimuat otomatis di latar belakang saat halaman dibuka, dan memuat sampai **1000 repo**.
+The **Select repository** button opens the list of repos the token can access, sorted from most recently changed, with a search field. Private repos are marked 🔒. The list is loaded automatically in the background when the page is opened, and loads up to **1000 repos**.
 
-| Token | Yang muncul di daftar |
+| Token | What appears in the list |
 |---|---|
-| Fine-grained, **All repositories** | Semua repo milik pemilik token itu |
-| Fine-grained, **Only select repositories** | Hanya repo yang dipilih, misalnya satu repo saja |
-| Classic | Semua repo milik sendiri, repo tempat menjadi kolaborator, dan repo organisasi |
+| Fine-grained, **All repositories** | All repos owned by the token's owner |
+| Fine-grained, **Only select repositories** | Only the selected repos, for example just one repo |
+| Classic | All of your own repos, repos where you are a collaborator, and organization repos |
 
-Setelah memilih repo, muncul dua pilihan: **Build with workflow** dan **Download ZIP**. Bila daftar gagal dimuat, tombol berubah menjadi *"Could not load repositories. Tap to retry"*.
+After choosing a repo, two options appear: **Build with workflow** and **Download ZIP**. If the list fails to load, the button changes to *"Could not load repositories. Tap to retry"*.
 
-**Tempel alamat repo**
+**Paste a repo address**
 
-Untuk repo orang lain atau repo di luar daftar. Bentuk yang dikenali:
+For someone else's repo or a repo outside the list. Recognized forms:
 
 ```
 https://github.com/owner/repo
 github.com/owner/repo
 owner/repo
 git@github.com:owner/repo.git
-https://github.com/owner/repo/tree/nama-branch
+https://github.com/owner/repo/tree/branch-name
 ```
 
-Bila alamat memuat `/tree/<branch>`, branch itu dipakai sebagai awal. Bila tidak, dipakai branch default.
+If the address contains `/tree/<branch>`, that branch is used as the starting point. If not, the default branch is used.
 
-### 3. Branch dan tag
+### 3. Branch and tag
 
-Setelah repo dibaca, halaman repo menampilkan status (**Public** atau **Private**) dan branch default. Tombol **Use workflow from** membuka dialog *Switch branches/tags*:
+After the repo is read, the repo page shows the status (**Public** or **Private**) and the default branch. The **Use workflow from** button opens the *Switch branches/tags* dialog:
 
-- Tab **Branches** dan **Tags**, dengan kolom **Find a branch or tag**
-- Branch default ditandai `(default)`, pilihan aktif ditandai `✓`
-- Memuat sampai 500 branch dan 500 tag
-- Mengganti branch membaca ulang semua workflow **pada branch itu**, karena isi workflow dan input bisa berbeda antar branch
+- **Branches** and **Tags** tabs, with a **Find a branch or tag** field
+- The default branch is marked `(default)`, the active choice is marked `✓`
+- Loads up to 500 branches and 500 tags
+- Switching the branch re-reads all workflows **on that branch**, because workflow contents and inputs can differ between branches
 
-Workflow dijalankan **pada branch atau tag yang dipilih**.
+The workflow is run **on the selected branch or tag**.
 
-### 4. Workflow dan input
+### 4. Workflow and inputs
 
-Semua workflow repo ditampilkan sebagai kartu (nama dan path file). Sebuah workflow **bisa dijalankan** bila statusnya aktif **dan** punya pemicu manual `workflow_dispatch`. Bila tidak, kartu diberi catatan:
+All of the repo's workflows are shown as cards (name and file path). A workflow **can be run** if its status is active **and** it has the manual trigger `workflow_dispatch`. If not, the card is given a note:
 
-| Catatan | Arti |
+| Note | Meaning |
 |---|---|
-| `Disabled on GitHub` | Workflow dinonaktifkan di GitHub |
-| `Not found on <branch>` | File workflow tidak ada di branch itu |
-| `No manual trigger (workflow_dispatch)` | Tidak punya `workflow_dispatch`. Tambahkan `on: workflow_dispatch:` di file workflow |
-| `Inputs unavailable: the token needs Contents (read)` | File tidak bisa dibaca; workflow jalan tanpa input |
+| `Disabled on GitHub` | The workflow is disabled on GitHub |
+| `Not found on <branch>` | The workflow file does not exist on that branch |
+| `No manual trigger (workflow_dispatch)` | It has no `workflow_dispatch`. Add `on: workflow_dispatch:` to the workflow file |
+| `Inputs unavailable: the token needs Contents (read)` | The file cannot be read; the workflow runs without inputs |
 
-Input yang didefinisikan di `workflow_dispatch.inputs` tampil sebagai form: `string` dan `number` sebagai kolom teks, `boolean` sebagai kotak centang, `choice` sebagai pilihan. Input wajib diberi tanda `*`; bila kosong, aplikasi menolak menjalankan. Nilai bawaan dari file workflow diisi otomatis, dan nilai yang sudah kamu ubah dipertahankan saat berganti workflow selama masih valid.
+Inputs defined in `workflow_dispatch.inputs` appear as a form: `string` and `number` as text fields, `boolean` as a checkbox, `choice` as a selection. Required inputs are marked with `*`; if empty, the app refuses to run. Default values from the workflow file are filled in automatically, and values you have changed are kept when switching workflows as long as they are still valid.
 
-Contoh workflow yang bisa dijalankan dari Studio Mobile:
+Example of a workflow that can be run from Studio Mobile:
 
 ```yaml
 name: Build APK
@@ -1144,123 +1144,123 @@ jobs:
           path: app/build/outputs/apk/**/*.apk
 ```
 
-### 5. Menjalankan dan memantau
+### 5. Running and monitoring
 
-Tombol **Run workflow** mengirim perintah ke GitHub, lalu halaman run menampilkan:
+The **Run workflow** button sends the command to GitHub, then the run page shows:
 
-- Judul run (`#nomor`), branch, status (*Queued*, *Running*, *Succeeded*, *Failed*, *Cancelled*, *Timed out*), dan waktu berjalan
-- **Steps**: daftar tahap dengan penanda `✓` berhasil, `✕` gagal, `●` berjalan, `○` menunggu
-- **Log** dan tombol **Stop** (membatalkan run di GitHub) serta **Open on GitHub**
-- Status diperbarui tiap 3 detik. Bila koneksi putus, aplikasi mencoba lagi sendiri. Bila terkena batas laju GitHub (403/429), jeda 20 detik
-- Link **Resume last run** di halaman utama membuka kembali run terakhir, misalnya setelah aplikasi ditutup
+- The run title (`#number`), branch, status (*Queued*, *Running*, *Succeeded*, *Failed*, *Cancelled*, *Timed out*), and elapsed time
+- **Steps**: a list of stages with markers `✓` succeeded, `✕` failed, `●` running, `○` waiting
+- **Log** and a **Stop** button (cancels the run on GitHub) as well as **Open on GitHub**
+- Status is updated every 3 seconds. If the connection drops, the app retries by itself. If GitHub's rate limit is hit (403/429), there is a 20-second pause
+- The **Resume last run** link on the main page reopens the last run, for example after the app was closed
 
 **Log**
 
-- Log dibaca dari job yang sedang berjalan (atau job yang gagal) dan menyimpan **5000 baris terakhir**
-- Kotak log bisa digulir ke atas dan ke bawah, ada tombol **Top**, **Bottom**, dan **Full screen**. Tampilan layar penuh bisa digulir dan teksnya bisa disalin, serta ikut diperbarui selama build
-- Bila run gagal, muncul kartu **Errors found in the log** yang merangkum baris error (misalnya `error:`, `FAILURE:`, `What went wrong`, `Exception`), supaya penyebab tidak tertimbun oleh log pembersihan di akhir
-- Log job yang gagal disimpan utuh di `Studio Mobile/Build Error Logs/<repo>-run<nomor>.log`
+- The log is read from the job that is running (or the job that failed) and keeps the **last 5000 lines**
+- The log box can be scrolled up and down, with **Top**, **Bottom**, and **Full screen** buttons. The full-screen view can be scrolled and its text can be copied, and it is also updated during the build
+- If the run fails, an **Errors found in the log** card appears that summarizes the error lines (for example `error:`, `FAILURE:`, `What went wrong`, `Exception`), so the cause is not buried under cleanup logs at the end
+- The log of a failed job is saved in full at `Studio Mobile/Build Error Logs/<repo>-run<number>.log`
 
-**Hasil (Result)**
+**Result**
 
-- Run yang berhasil menampilkan artifact-nya (nama dan ukuran). Bila hanya ada **satu** artifact, langsung diunduh otomatis; bila lebih, tekan **Download** pada yang diinginkan. Unduhan punya progres dan tombol **Cancel**
-- ZIP disimpan di `Studio Mobile/Github Application Zip/<repo>-run<nomor>-<artifact>.zip`
-- Bila ZIP berisi file `.apk`, muncul tombol **Install**. Android akan meminta izin *Install unknown apps* untuk Studio Mobile pada pemakaian pertama
-- Artifact yang sudah kedaluwarsa di GitHub ditandai *Expired on GitHub*
+- A successful run shows its artifacts (name and size). If there is only **one** artifact, it is downloaded automatically; if more, tap **Download** on the one you want. Downloads have progress and a **Cancel** button
+- The ZIP is saved at `Studio Mobile/Github Application Zip/<repo>-run<number>-<artifact>.zip`
+- If the ZIP contains an `.apk` file, an **Install** button appears. Android will ask for the *Install unknown apps* permission for Studio Mobile on first use
+- Artifacts that have expired on GitHub are marked *Expired on GitHub*
 
-### 6. Unduh repo ZIP
+### 6. Download repo ZIP
 
-Mengunduh seluruh isi repo sebagai satu file ZIP, **tanpa perlu workflow**. Bisa untuk repo sendiri maupun repo orang lain (repo private butuh token yang punya akses).
+Downloads the entire contents of a repo as a single ZIP file, **without needing a workflow**. Works for your own repos as well as other people's repos (private repos need a token that has access).
 
-Tiga tempat untuk memulainya:
+Three places to start it from:
 
-| Dari mana | Cara | Branch yang diunduh |
+| From where | How | Branch downloaded |
 |---|---|---|
-| Halaman utama | Isi alamat repo, tekan **Download repository ZIP** | Branch dari `/tree/<branch>` bila ada, kalau tidak branch default |
-| Dropdown repo sendiri | Pilih repo → **Download ZIP** | Branch default |
-| Halaman repo | Tombol **Download ZIP of <branch/tag>** | Branch atau tag yang sedang dipilih |
+| Main page | Enter the repo address, press **Download repository ZIP** | The branch from `/tree/<branch>` if present, otherwise the default branch |
+| Own repo dropdown | Choose a repo → **Download ZIP** | Default branch |
+| Repo page | The **Download ZIP of <branch/tag>** button | The branch or tag currently selected |
 
-Hasil:
+Result:
 
-- Disimpan langsung di folder **Download** HP sebagai `<repo>-<branch>.zip`. Bila nama sudah ada, Android menambahkan angka di belakangnya. Tidak butuh izin penyimpanan tambahan
-- Selama mengunduh tampil dialog progres dengan tombol **Cancel**. Bila dibatalkan atau gagal, file setengah jadi dihapus otomatis
-- Isi ZIP adalah satu folder induk bernama `<owner>-<repo>-<kode commit>/` berisi semua file pada branch itu
-- Ini ZIP dari GitHub: **tanpa folder `.git`** (tanpa riwayat commit), submodule tidak ikut, dan file Git LFS hanya berupa penunjuk (bukan isi aslinya)
-- Folder tujuannya berbeda dengan hasil build: ZIP repo masuk ke **Download**, sedangkan artifact hasil workflow masuk ke `Studio Mobile/Github Application Zip/`
+- Saved directly in the phone's **Download** folder as `<repo>-<branch>.zip`. If the name already exists, Android adds a number after it. No additional storage permission is needed
+- While downloading, a progress dialog with a **Cancel** button appears. If canceled or failed, the partial file is deleted automatically
+- The ZIP contents are a single parent folder named `<owner>-<repo>-<commit code>/` containing all files on that branch
+- This is a ZIP from GitHub: **without the `.git` folder** (no commit history), submodules are not included, and Git LFS files are only pointers (not the actual contents)
+- The destination folder is different from build results: repo ZIPs go to **Download**, while workflow result artifacts go to `Studio Mobile/Github Application Zip/`
 
-Untuk memakai ZIP repo sebagai project di Studio Mobile, gunakan fitur import project dari ZIP.
+To use a repo ZIP as a project in Studio Mobile, use the import project from ZIP feature.
 
-### 7. Masalah umum
+### 7. Common problems
 
-| Pesan / gejala | Penyebab dan solusi |
+| Message / symptom | Cause and solution |
 |---|---|
-| `The token was rejected...` | Token salah atau kedaluwarsa. Tekan **Delete Token**, lalu masukkan token baru |
-| `Not found. Check the address, or the token may not have access...` | Alamat salah, atau token tidak mencakup repo itu. Untuk fine-grained, tambahkan repo ke daftar akses token |
-| Repo tidak muncul di dropdown | Token fine-grained hanya mencakup satu pemilik dan repo yang dipilih. Tempel alamat repo secara manual, atau buat token baru |
-| `This repository has no GitHub Actions workflows.` | Repo belum punya workflow. Unduh sebagai ZIP, atau tambahkan file di `.github/workflows/` |
-| Tombol Run redup, workflow tidak bisa dipilih | Workflow tidak punya `workflow_dispatch`, atau nonaktif. Lihat catatan di kartu |
-| `The workflow was started, but its run could not be found.` | GitHub terlambat membuat run (cek 60 detik). Tekan **Open on GitHub** atau pakai **Resume last run** |
-| Log tidak lengkap | Hanya 5000 baris terakhir yang ditampilkan. Buka **Open on GitHub** untuk log utuh, atau lihat file di `Build Error Logs/` bila run gagal |
-| `Blocked an unsafe redirect.` | GitHub mengarahkan unduhan ke alamat non-HTTPS atau terlalu banyak pengalihan. Unduhan dibatalkan demi keamanan |
+| `The token was rejected...` | The token is wrong or expired. Press **Delete Token**, then enter a new token |
+| `Not found. Check the address, or the token may not have access...` | The address is wrong, or the token does not cover that repo. For fine-grained, add the repo to the token's access list |
+| Repo does not appear in the dropdown | A fine-grained token only covers one owner and the selected repos. Paste the repo address manually, or create a new token |
+| `This repository has no GitHub Actions workflows.` | The repo has no workflows yet. Download it as a ZIP, or add a file in `.github/workflows/` |
+| The Run button is dimmed, workflow cannot be selected | The workflow has no `workflow_dispatch`, or is disabled. See the note on the card |
+| `The workflow was started, but its run could not be found.` | GitHub was late creating the run (checked for 60 seconds). Press **Open on GitHub** or use **Resume last run** |
+| Log is incomplete | Only the last 5000 lines are shown. Open **Open on GitHub** for the full log, or see the file in `Build Error Logs/` if the run failed |
+| `Blocked an unsafe redirect.` | GitHub redirected the download to a non-HTTPS address or there were too many redirects. The download is canceled for security |
 
 ---
 
-## MCP dan Relay Server
+## MCP and Relay Server
 
-MCP memungkinkan asisten AI (Claude, ChatGPT, Gemini CLI) **membaca, mengedit, dan membuild project** dari HP.
+MCP lets an AI assistant (Claude, ChatGPT, Gemini CLI) **read, edit, and build projects** from the phone.
 
-HP tidak punya alamat publik, jadi ada **relay server** buatan Anda sendiri di tengah. HP yang menghubungi relay (long-poll), bukan sebaliknya:
+The phone has no public address, so there is a **relay server** of your own in the middle. The phone contacts the relay (long-poll), not the other way around:
 
 ```
-AI  --POST /s/<secret>/mcp-->  RELAY  <--long-poll GET /s/<secret>/phone/poll--  HP
-                                      <--POST /s/<secret>/phone/reply/<id>------  HP
+AI  --POST /s/<secret>/mcp-->  RELAY  <--long-poll GET /s/<secret>/phone/poll--  PHONE
+                                      <--POST /s/<secret>/phone/reply/<id>------  PHONE
 ```
 
-Alamat relay **tidak ditanam di aplikasi**. Anda mengetiknya sendiri di layar MCP dan tersimpan hanya di HP.
+The relay address is **not embedded in the app**. You type it yourself on the MCP screen and it is stored only on the phone.
 
-### 1. Jalankan relay
+### 1. Run the relay
 
-Kode ada di folder `relay/`: satu file `server.js`, **Node.js 18+**, **tanpa dependensi**.
+The code is in the `relay/` folder: a single `server.js` file, **Node.js 18+**, **no dependencies**.
 
 ```bash
 cd relay
-# buat secret panjang dan acak: ini adalah "kunci" menuju HP Anda
+# create a long, random secret: this is the "key" to your phone
 export SECRET=$(openssl rand -hex 24)
-echo "Secret Anda: $SECRET"
+echo "Your secret: $SECRET"
 
 PORT=8787 node server.js
 # Studio Mobile MCP relay listening on :8787
 ```
 
-Cek relay hidup:
+Check that the relay is alive:
 
 ```bash
 curl http://localhost:8787/health
 # Studio Mobile MCP relay is running.
 ```
 
-Untuk dipakai dari internet, relay **wajib di belakang HTTPS** (aplikasi menolak `http://`). Contoh paling sederhana memakai reverse proxy, misalnya Caddy (sertifikat HTTPS otomatis):
+To be used from the internet, the relay **must be behind HTTPS** (the app rejects `http://`). The simplest example uses a reverse proxy, for example Caddy (automatic HTTPS certificate):
 
 ```
 # Caddyfile
-relay.contoh.com {
+relay.example.com {
     reverse_proxy localhost:8787
 }
 ```
 
-Relay juga bisa dipasang di layanan hosting mana pun yang menjalankan Node 18+ dan menyediakan HTTPS. Alamat akhirnya akan seperti `https://relay.contoh.com/s/<secret>`.
+The relay can also be installed on any hosting service that runs Node 18+ and provides HTTPS. The final address will look like `https://relay.example.com/s/<secret>`.
 
-### 2. Variabel lingkungan relay
+### 2. Relay environment variables
 
-| Variabel | Bawaan | Fungsi |
+| Variable | Default | Function |
 |---|---|---|
-| `PORT` | `8787` | Port server |
-| `RELAY_SECRETS` | kosong | Daftar secret yang diizinkan, dipisah koma. Kosong berarti secret apa pun sepanjang 16 sampai 128 karakter (`A-Z a-z 0-9 _ -`) diterima |
-| `AI_TIMEOUT_SECONDS` | `120` | Berapa lama permintaan AI menunggu jawaban HP |
-| `AI_TOKEN` | kosong | Bila diisi, setiap permintaan AI ke `/mcp` wajib membawa `Authorization: Bearer <token>` atau `X-API-Key: <token>` |
-| `PHONE_TOKEN` | kosong | Bila diisi, HP wajib mengirim token yang sama |
+| `PORT` | `8787` | Server port |
+| `RELAY_SECRETS` | empty | List of allowed secrets, separated by commas. Empty means any secret of 16 to 128 characters (`A-Z a-z 0-9 _ -`) is accepted |
+| `AI_TIMEOUT_SECONDS` | `120` | How long an AI request waits for the phone's answer |
+| `AI_TOKEN` | empty | If filled in, every AI request to `/mcp` must carry `Authorization: Bearer <token>` or `X-API-Key: <token>` |
+| `PHONE_TOKEN` | empty | If filled in, the phone must send the same token |
 
-Contoh produksi yang lebih aman:
+A safer production example:
 
 ```bash
 export RELAY_SECRETS="$SECRET"
@@ -1269,43 +1269,43 @@ export PHONE_TOKEN=$(openssl rand -hex 24)
 node server.js
 ```
 
-> `AI_TOKEN` hanya cocok untuk klien yang bisa mengirim header (Claude Code, Gemini CLI). **Jangan isi `AI_TOKEN` bila relay dipakai ChatGPT**, karena form connector ChatGPT tidak punya kolom header.
+> `AI_TOKEN` only suits clients that can send headers (Claude Code, Gemini CLI). **Do not fill in `AI_TOKEN` if the relay is used by ChatGPT**, because ChatGPT's connector form has no header field.
 
-Batas relay: body maksimal 8 MB, antrean maksimal 50 permintaan, HP dianggap online bila terlihat dalam 45 detik terakhir.
+Relay limits: body maximum 8 MB, queue maximum 50 requests, the phone is considered online if seen within the last 45 seconds.
 
-### 3. Hubungkan HP
+### 3. Connect the phone
 
-1. Buka Studio Mobile → **MCP**.
-2. Isi **Relay URL**, misalnya `https://relay.contoh.com/s/ISI_SECRET_ANDA`. Boleh dengan akhiran `/mcp` atau tanpa `https://`; aplikasi merapikannya. Tidak boleh `http://`, tidak boleh ada `?` atau `#`.
-3. Bila relay memakai `PHONE_TOKEN`, isi kolom **Phone token**.
-4. Tekan **Connect** dan tunggu status **Connected**.
-5. Salin **alamat AI** (`.../mcp`) lewat tombol **Copy address**.
+1. Open Studio Mobile → **MCP**.
+2. Fill in the **Relay URL**, for example `https://relay.example.com/s/ENTER_YOUR_SECRET`. It may end with `/mcp` or lack `https://`; the app tidies it up. `http://` is not allowed, and there must be no `?` or `#`.
+3. If the relay uses `PHONE_TOKEN`, fill in the **Phone token** field.
+4. Press **Connect** and wait for the **Connected** status.
+5. Copy the **AI address** (`.../mcp`) using the **Copy address** button.
 
-### 4. Hubungkan AI
+### 4. Connect the AI
 
-Ganti `ALAMAT_AI` dengan `https://relay.contoh.com/s/ISI_SECRET_ANDA/mcp`.
+Replace `AI_ADDRESS` with `https://relay.example.com/s/ENTER_YOUR_SECRET/mcp`.
 
-**Claude (claude.ai / aplikasi desktop):** Customize → Connectors → **+** → *Add custom connector*. Nama: `Studio Mobile`. Remote MCP server URL: `ALAMAT_AI`. Kosongkan sign-in dan pengaturan lanjutan. Aktifkan connector di chat, lalu coba: *"Tampilkan daftar project Studio Mobile saya."*
+**Claude (claude.ai / desktop app):** Customize → Connectors → **+** → *Add custom connector*. Name: `Studio Mobile`. Remote MCP server URL: `AI_ADDRESS`. Leave sign-in and advanced settings empty. Enable the connector in the chat, then try: *"Show the list of my Studio Mobile projects."*
 
 **Claude Code:**
 
 ```bash
-claude mcp add --transport http studio-mobile ALAMAT_AI
+claude mcp add --transport http studio-mobile AI_ADDRESS
 
-# bila relay memakai AI_TOKEN
-claude mcp add --transport http studio-mobile ALAMAT_AI \
-  --header "Authorization: Bearer TOKEN_AI_ANDA"
+# if the relay uses AI_TOKEN
+claude mcp add --transport http studio-mobile AI_ADDRESS \
+  --header "Authorization: Bearer YOUR_AI_TOKEN"
 ```
 
-Atau lewat `.mcp.json`:
+Or through `.mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "studio-mobile": {
       "type": "http",
-      "url": "ALAMAT_AI",
-      "headers": { "Authorization": "Bearer TOKEN_AI_ANDA" }
+      "url": "AI_ADDRESS",
+      "headers": { "Authorization": "Bearer YOUR_AI_TOKEN" }
     }
   }
 }
@@ -1314,147 +1314,147 @@ Atau lewat `.mcp.json`:
 **Gemini CLI:**
 
 ```bash
-gemini mcp add --transport http --scope user studio-mobile ALAMAT_AI
+gemini mcp add --transport http --scope user studio-mobile AI_ADDRESS
 ```
 
-Atau di `~/.gemini/settings.json` (pakai `httpUrl`, **bukan** `url`, karena `url` berarti SSE):
+Or in `~/.gemini/settings.json` (use `httpUrl`, **not** `url`, because `url` means SSE):
 
 ```json
-{ "mcpServers": { "studio-mobile": { "httpUrl": "ALAMAT_AI" } } }
+{ "mcpServers": { "studio-mobile": { "httpUrl": "AI_ADDRESS" } } }
 ```
 
-Ketik `/mcp` di Gemini CLI untuk memastikan `studio-mobile` terhubung.
+Type `/mcp` in Gemini CLI to make sure `studio-mobile` is connected.
 
-**ChatGPT:** Settings → Apps & Connectors → Advanced settings → nyalakan *Developer mode* (butuh paket yang mendukung). Buat connector `Studio Mobile`, MCP server URL `ALAMAT_AI`, Authentication: *No authentication*, centang *I trust this application*. Di chat baru pilih **+** → More → Developer mode → Studio Mobile.
+**ChatGPT:** Settings → Apps & Connectors → Advanced settings → turn on *Developer mode* (needs a plan that supports it). Create a connector `Studio Mobile`, MCP server URL `AI_ADDRESS`, Authentication: *No authentication*, tick *I trust this application*. In a new chat choose **+** → More → Developer mode → Studio Mobile.
 
-**Klien yang hanya mendukung stdio:**
+**Clients that only support stdio:**
 
 ```bash
-npx -y mcp-remote ALAMAT_AI
+npx -y mcp-remote AI_ADDRESS
 ```
 
-### 5. Tool yang tersedia untuk AI
+### 5. Tools available to the AI
 
-| Kelompok | Tool |
+| Group | Tools |
 |---|---|
 | Info | `get_studio_limits`, `get_toolchain_info`, `workspace_overview` |
-| Baca | `list_projects`, `list_files`, `read_file`, `search_text`, `find_files`, `check_local_libs` |
-| Periksa | `validate_project`, `check_syntax` |
+| Read | `list_projects`, `list_files`, `read_file`, `search_text`, `find_files`, `check_local_libs` |
+| Check | `validate_project`, `check_syntax` |
 | Build | `get_build_status`, `wait_for_build`, `get_build_log` |
-| Tulis | `write_file`, `edit_file`, `multi_edit`, `replace_lines`, `insert_lines`, `append_file` |
-| Kelola file | `copy_path`, `create_directory`, `move_path`, `delete_path` |
+| Write | `write_file`, `edit_file`, `multi_edit`, `replace_lines`, `insert_lines`, `append_file` |
+| File management | `copy_path`, `create_directory`, `move_path`, `delete_path` |
 | Debug | `set_debug_mode` |
 
-Tool kelompok **Tulis**, **Kelola file**, dan `set_debug_mode` hanya muncul bila **Read-only mode dimatikan**.
+Tools in the **Write** and **File management** groups, and `set_debug_mode`, only appear if **Read-only mode is turned off**.
 
-### 6. Contoh perintah ke AI
+### 6. Example commands to the AI
 
-- *"Daftar semua project di Studio Mobile."*
-- *"Baca `MainActivity.java` di project Kalkulator dan jelaskan alurnya."*
-- *"Ubah warna tombol di `activity_main.xml` jadi biru, lalu build."*
-- *"Nyalakan Debug Mode, build, dan beri tahu saya bila ada crash."*
-- *"Cari semua pemakaian `Toast` di project ini."*
+- *"List all projects in Studio Mobile."*
+- *"Read `MainActivity.java` in the Calculator project and explain its flow."*
+- *"Change the button color in `activity_main.xml` to blue, then build."*
+- *"Turn on Debug Mode, build, and tell me if there is a crash."*
+- *"Find all uses of `Toast` in this project."*
 
-Saat AI mengubah file, editor dan preview yang sedang terbuka ikut diperbarui. Perubahan beruntun digabung (sinkronisasi 300 ms setelah perubahan terakhir, paling lambat 1,5 detik setelah yang pertama). Bila Anda punya edit yang belum disimpan di file yang sama, edit Anda **tidak ditimpa**.
+When the AI changes a file, the editor and preview that are currently open are updated too. Successive changes are merged (sync 300 ms after the last change, at the latest 1.5 seconds after the first). If you have unsaved edits in the same file, your edits are **not overwritten**.
 
-### 7. Keamanan
+### 7. Security
 
-- Siapa pun yang tahu Relay URL dapat menjangkau HP Anda. **Jaga kerahasiaannya** dan pakai secret panjang acak (`openssl rand -hex 24`)
-- Biarkan **Read-only mode menyala** kecuali Anda memang mengizinkan AI mengubah, memindah, menghapus file, mengubah file Gradle, dan menjalankan build
-- Pakai `RELAY_SECRETS`, `AI_TOKEN`, dan `PHONE_TOKEN` pada relay yang bisa diakses publik
-- Selalu sajikan relay lewat HTTPS
+- Anyone who knows the Relay URL can reach your phone. **Keep it secret** and use a long random secret (`openssl rand -hex 24`)
+- Leave **Read-only mode on** unless you really do allow the AI to change, move, and delete files, change Gradle files, and run builds
+- Use `RELAY_SECRETS`, `AI_TOKEN`, and `PHONE_TOKEN` on a relay that can be accessed publicly
+- Always serve the relay over HTTPS
 
-### 8. Masalah umum
+### 8. Common problems
 
-| Pesan / gejala | Penyebab dan solusi |
+| Message / symptom | Cause and solution |
 |---|---|
-| `Studio Mobile is not connected to this relay` | HP belum Connect atau mati koneksi. Buka aplikasi → MCP → Connect |
-| `The phone did not answer in time` | HP tidak membalas dalam `AI_TIMEOUT_SECONDS`. Pastikan aplikasi tidak dihentikan sistem dan internet aktif |
-| `Missing or wrong AI token` / `phone token` | Token header tidak sama dengan `AI_TOKEN` / `PHONE_TOKEN` |
-| `This secret is not allowed on this relay` | Secret tidak ada di `RELAY_SECRETS`, atau kurang dari 16 karakter |
-| `The phone has too many pending requests` | Antrean penuh (50). Tunggu atau mulai ulang koneksi |
-| Aplikasi menolak Relay URL | Harus `https://`, tanpa `?` atau `#` |
+| `Studio Mobile is not connected to this relay` | The phone has not connected or the connection was lost. Open the app → MCP → Connect |
+| `The phone did not answer in time` | The phone did not reply within `AI_TIMEOUT_SECONDS`. Make sure the app is not stopped by the system and the internet is active |
+| `Missing or wrong AI token` / `phone token` | The header token is not the same as `AI_TOKEN` / `PHONE_TOKEN` |
+| `This secret is not allowed on this relay` | The secret is not in `RELAY_SECRETS`, or is shorter than 16 characters |
+| `The phone has too many pending requests` | The queue is full (50). Wait or restart the connection |
+| The app rejects the Relay URL | It must be `https://`, without `?` or `#` |
 
 ---
 
-## Fitur IDE
+## IDE features
 
-- Editor dengan syntax highlighting dan **preview** (layout XML, WebView, React/JSX)
-- Import project dari ZIP (termasuk berpassword) atau folder; **Export Project To Zip** dengan picker bawaan Android
-- **Keystore** per project: key bawaan untuk uji coba, atau key sendiri (buat baru, import, export, copy); halaman dan dialog key dilindungi `FLAG_SECURE`; Export AAB untuk Google Play
-- **Wallpaper editor**: foto atau video live (maks. 60 detik) di belakang editor
-- **Wizard project baru** dengan ikon, versi, dan SDK pilihan Anda, plus ikon Google Play 512 x 512
-- **Debug Mode** (penangkap crash di aplikasi hasil build, dan untuk Studio Mobile sendiri)
-- Build berjalan di latar belakang dengan notifikasi progres dan tombol Stop
-- **GitHub Build**: daftar repo sendiri, pilih branch/tag dan workflow, jalankan di GitHub Actions, log dengan ringkasan error, dan pasang APK hasilnya
-- **Unduh repo ZIP** langsung ke folder Download, untuk repo sendiri atau repo orang lain
-- **MCP relay** agar asisten AI bisa membaca, mengedit, dan membuild project dari HP
-- Build Error Logs per aplikasi: `<nama app>-erors-logs.txt`
+- Editor with syntax highlighting and **preview** (XML layout, WebView, React/JSX)
+- Import projects from ZIP (including password-protected) or a folder; **Export Project To Zip** with Android's built-in picker
+- **Keystore** per project: a built-in key for testing, or your own key (create new, import, export, copy); the key page and dialogs are protected by `FLAG_SECURE`; Export AAB for Google Play
+- **Editor wallpaper**: photo or live video (max. 60 seconds) behind the editor
+- **New project wizard** with the icon, version, and SDK of your choice, plus a 512 x 512 Google Play icon
+- **Debug Mode** (crash catcher in the built app, and for Studio Mobile itself)
+- Builds run in the background with a progress notification and a Stop button
+- **GitHub Build**: list of your own repos, choose branch/tag and workflow, run on GitHub Actions, logs with an error summary, and install the resulting APK
+- **Download repo ZIP** directly to the Download folder, for your own repo or someone else's
+- **MCP relay** so AI assistants can read, edit, and build projects from the phone
+- Build Error Logs per app: `<app name>-erors-logs.txt`
 
-**Struktur folder `Studio Mobile/`**
+**`Studio Mobile/` folder structure**
 
 ```
-My Project/        semua project
-My Application/    APK hasil "Save APK"
-Export AAB/        AAB untuk Google Play
-Icon Google Play Console/  ikon toko 512 x 512 per project
-Local/local_libs/  library hasil unduhan
-Build Error Logs/  satu log error per aplikasi (termasuk log run GitHub yang gagal)
-Github Application Zip/  artifact hasil GitHub Actions
+My Project/        all projects
+My Application/    APKs from "Save APK"
+Export AAB/        AABs for Google Play
+Icon Google Play Console/  512 x 512 store icon per project
+Local/local_libs/  downloaded libraries
+Build Error Logs/  one error log per app (including logs of failed GitHub runs)
+Github Application Zip/  artifacts from GitHub Actions
 ```
 
-ZIP repo dari fitur **Download repo ZIP** disimpan di folder **Download** milik Android, bukan di folder ini.
+Repo ZIPs from the **Download repo ZIP** feature are saved in Android's **Download** folder, not in this folder.
 
-Butuh izin "All files access" (Android 11+) agar folder berada di penyimpanan bersama. Tanpa izin, struktur yang sama dibuat di penyimpanan privat aplikasi.
+Needs the "All files access" permission (Android 11+) so that the folder is in shared storage. Without the permission, the same structure is created in the app's private storage.
 
-**Izin yang diminta aplikasi**
+**Permissions requested by the app**
 
-| Izin | Untuk apa |
+| Permission | What it is for |
 |---|---|
-| `INTERNET` | Mengunduh komponen build dan dependensi, serta MCP dan GitHub |
-| `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `WAKE_LOCK` | Build tetap jalan saat layar mati |
-| `POST_NOTIFICATIONS` | Notifikasi progres dan hasil build (Android 13+) |
-| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Build panjang tidak dimatikan sistem; ditanyakan sekali dan Anda yang memutuskan |
-| `REQUEST_INSTALL_PACKAGES` | Membuka installer sistem untuk APK yang baru dibuild |
-| `MANAGE_EXTERNAL_STORAGE` | Folder `Studio Mobile/` di penyimpanan bersama (Android 11+). Di Android 8 dan 9 dipakai izin penyimpanan klasik |
+| `INTERNET` | Downloading build components and dependencies, as well as MCP and GitHub |
+| `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `WAKE_LOCK` | Builds keep running while the screen is off |
+| `POST_NOTIFICATIONS` | Progress and build result notifications (Android 13+) |
+| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Long builds are not killed by the system; asked once and you decide |
+| `REQUEST_INSTALL_PACKAGES` | Opens the system installer for a newly built APK |
+| `MANAGE_EXTERNAL_STORAGE` | The `Studio Mobile/` folder in shared storage (Android 11+). On Android 8 and 9 the classic storage permission is used |
 
 ---
 
-## Keterbatasan
+## Limitations
 
-- **Python, Dart, Flutter, dan C/C++ hanya untuk arm64-v8a.** Tidak jalan di ARM 32-bit (armeabi-v7a), x86, dan x86_64 yang tidak bisa menjalankan kode arm64
-- **Build Gradle butuh HP ARM** (JDK hanya tersedia untuk arm64-v8a dan armeabi-v7a)
-- `compileSdk` / `targetSdk` di atas **API 37** tidak didukung
-- Export AAB lewat Gradle selalu memakai varian **release** dari file Gradle project. Tanpa key di Keystore dan tanpa `signingConfig` release, bundle tidak tertandatangani
-- Satu APK per build: tanpa build variant dan product flavor kustom
-- Jetpack Compose tidak didukung. Annotation processor hanya untuk sumber Java; kapt (Kotlin) tidak tersedia di HP
-- Plugin Gradle sembarang hanya bisa lewat build engine Gradle; build lokal tidak menjalankannya
-- Manifest merging tidak mendukung `tools:node` dan `tools:replace`
-- Dart tanpa package pub; Python tidak dikemas ke APK
-- **Flutter masih tahap awal**: hanya arm64-v8a, SDK dipasang dan dicek, tetapi **belum menghasilkan APK**
-- Tidak ada unit test atau instrumented test; hanya `assembleDebug` (ditambah `bundleRelease` untuk Export AAB di build Gradle)
-- Wizard hanya membuat file awal minimal (satu `MainActivity` berisi satu `TextView`, manifest, `strings.xml`, `themes.xml`). Tidak ada layout XML atau kode contoh lain, dan project yang diimpor tidak diubah
-- Pemeriksaan risiko crash sebelum build hanya ada di **build lokal**
-- Wallpaper video maksimal **60 detik** dan 500 MB, hanya diputar di code editor
-- Key bawaan Studio Mobile dibuat otomatis, sama untuk semua pemakai, dan **tidak boleh dipakai untuk rilis**; gunakan key sendiri. Import key hanya mendukung format `.p12` (PKCS12). `FLAG_SECURE` tidak menghalangi foto layar dengan kamera
-- Komponen besar (NDK, JDK, Gradle, standard library Python) diunduh saat pertama dipakai dan butuh internet serta ruang penyimpanan
-- **Preview tidak menjalankan kode** Java/Kotlin: logika, jaringan, dan database tidak aktif; `ConstraintLayout` belum mendukung barrier, group, dan flow
-- **Repository** hanya HTTPS; kredensial, variabel, `flatDir`, `mavenLocal()`, dan SNAPSHOT tidak didukung
-- **Debug Mode** harus dimatikan sebelum aplikasi dibagikan
-- **GitHub Build**: hanya workflow dengan `workflow_dispatch` yang bisa dijalankan; daftar repo dibatasi 1000, branch dan tag masing-masing 500; log menampilkan 5000 baris terakhir; token fine-grained hanya mencakup satu pemilik
-- **Repo ZIP** tidak memuat riwayat Git (`.git`), submodule, atau isi file Git LFS
+- **Python, Dart, Flutter, and C/C++ are for arm64-v8a only.** They do not run on 32-bit ARM (armeabi-v7a), and on x86 and x86_64 that cannot run arm64 code
+- **Gradle builds need an ARM phone** (the JDK is only available for arm64-v8a and armeabi-v7a)
+- `compileSdk` / `targetSdk` above **API 37** are not supported
+- Export AAB through Gradle always uses the **release** variant from the project's Gradle file. Without a key in the Keystore and without a release `signingConfig`, the bundle is not signed
+- One APK per build: no build variants and custom product flavors
+- Jetpack Compose is not supported. Annotation processors are for Java sources only; kapt (Kotlin) is not available on the phone
+- Arbitrary Gradle plugins can only go through the Gradle build engine; the local build does not run them
+- Manifest merging does not support `tools:node` and `tools:replace`
+- Dart without pub packages; Python is not packaged into the APK
+- **Flutter is still at an early stage**: arm64-v8a only, the SDK is installed and checked, but it **does not yet produce an APK**
+- No unit tests or instrumented tests; only `assembleDebug` (plus `bundleRelease` for Export AAB in Gradle builds)
+- The wizard only creates minimal starter files (one `MainActivity` containing one `TextView`, manifest, `strings.xml`, `themes.xml`). There are no XML layouts or other sample code, and imported projects are not changed
+- The crash risk check before build exists only in the **local build**
+- Video wallpaper is at most **60 seconds** and 500 MB, and is only played in the code editor
+- The Studio Mobile built-in key is created automatically, is the same for all users, and **must not be used for release**; use your own key. Key import only supports the `.p12` (PKCS12) format. `FLAG_SECURE` does not prevent photographing the screen with a camera
+- Large components (NDK, JDK, Gradle, Python standard library) are downloaded on first use and need internet and storage space
+- **Preview does not run** Java/Kotlin code: logic, network, and database are not active; `ConstraintLayout` does not yet support barrier, group, and flow
+- **Repository** is HTTPS only; credentials, variables, `flatDir`, `mavenLocal()`, and SNAPSHOT are not supported
+- **Debug Mode** must be turned off before the app is shared
+- **GitHub Build**: only workflows with `workflow_dispatch` can be run; the repo list is limited to 1000, branches and tags to 500 each; the log shows the last 5000 lines; a fine-grained token covers only one owner
+- **Repo ZIPs** do not contain Git history (`.git`), submodules, or the contents of Git LFS files
 
 ---
 
-## Lisensi
+## License
 
-Studio Mobile dirilis di bawah **PolyForm Noncommercial License 1.0.0** (`PolyForm-Noncommercial-1.0.0`). Ketentuan lengkapnya ada di <https://polyformproject.org/licenses/noncommercial/1.0.0>, dan ringkasan pemberitahuan ada di berkas [LICENSE](LICENSE).
+Studio Mobile is released under the **PolyForm Noncommercial License 1.0.0** (`PolyForm-Noncommercial-1.0.0`). The full terms are at <https://polyformproject.org/licenses/noncommercial/1.0.0>, and a summary notice is in the [LICENSE](LICENSE) file.
 
-| Boleh | Tidak boleh tanpa izin tertulis |
+| Allowed | Not allowed without written permission |
 |---|---|
-| Dipakai untuk keperluan pribadi, belajar, dan riset | Dijual atau dimasukkan ke produk berbayar |
-| Dipakai organisasi non-profit | Dipakai perusahaan untuk kegiatan bisnis |
-| Diubah, termasuk memperbaiki bug | Disebarkan sebagai bagian dari layanan atau produk komersial |
-| Disebarkan ulang untuk tujuan non-komersial | |
+| Used for personal purposes, learning, and research | Sold or included in paid products |
+| Used by non-profit organizations | Used by companies for business activities |
+| Modified, including fixing bugs | Distributed as part of a commercial service or product |
+| Redistributed for non-commercial purposes | |
 
 [CONTRIBUTING.md](CONTRIBUTING.md)
