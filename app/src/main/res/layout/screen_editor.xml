@@ -52,7 +52,7 @@
 
             <!-- User wallpaper (Settings > Change Wallpaper) with a dark shade over it so code stays readable. -->
             <ImageView android:id="@+id/editor_wallpaper" android:layout_width="match_parent" android:layout_height="match_parent"
-                android:scaleType="fitCenter" android:visibility="gone" android:contentDescription="@null" />
+                android:scaleType="centerCrop" android:visibility="gone" android:contentDescription="@null" />
             <View android:id="@+id/editor_wallpaper_shade" android:layout_width="match_parent" android:layout_height="match_parent" android:visibility="gone" />
 
             <LinearLayout android:id="@+id/editor_empty" android:layout_width="match_parent" android:layout_height="match_parent"
