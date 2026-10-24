@@ -64,8 +64,9 @@ final class PreviewStandIns {
         switch (name) {
             case "androidx.constraintlayout.widget.ConstraintLayout": return new PreviewConstraint.Layout(context, attrs, env);
             case "androidx.constraintlayout.widget.Guideline": return new PreviewConstraint.Guide(context, attrs);
-            case "androidx.constraintlayout.widget.Barrier":
-            case "androidx.constraintlayout.widget.Group":
+            case "androidx.constraintlayout.widget.Barrier": return new PreviewConstraint.Helper(context, attrs, env, true);
+            case "androidx.constraintlayout.widget.Group": return new PreviewConstraint.Helper(context, attrs, env, false);
+            case "androidx.constraintlayout.helper.widget.Flow": return new PreviewConstraint.FlowHelper(context, attrs, env);
             case "androidx.constraintlayout.widget.Placeholder": {
                 View hidden = new View(context, attrs);
                 hidden.setVisibility(View.GONE);
