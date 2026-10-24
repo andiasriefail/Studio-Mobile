@@ -7,7 +7,10 @@ import com.example.studiomobile.build.dependency.BuildToolCatalog;
 import com.example.studiomobile.build.gradle.AndroidSdkLayout;
 import com.example.studiomobile.build.gradle.GradleRuntime;
 import com.example.studiomobile.build.gradle.GradleRuntimeManager;
+import com.example.studiomobile.build.network.ConnectionWatchdog;
+import com.example.studiomobile.build.network.NetworkMonitor;
 import com.example.studiomobile.build.process.BuildProcessRunner;
+import com.example.studiomobile.build.process.ChildProcessReaper;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -23,6 +26,10 @@ public final class GradleBuildPipeline implements BuildPipeline {
     private volatile boolean cancelled;
     private volatile Process activeProcess;
     private volatile GradleRuntimeManager runtimeManager;
+    /** Set by the connection watchdog when a working connection was lost during an online build. */
+    private volatile boolean connectionLost;
+    /** The child processes that existed before Gradle started; everything new after it belongs to this build. */
+    private volatile ChildProcessReaper.Snapshot baseline;
 
     public GradleBuildPipeline(Context context) {
         this.context = context.getApplicationContext();
@@ -74,9 +81,20 @@ public final class GradleBuildPipeline implements BuildPipeline {
             : "Dependency resolution: online; Gradle may download required plugins and libraries into the persistent cache.");
         final BuildLogger screenLog = logger;
         DownloadWatcher watcher = new DownloadWatcher(runtime.getGradleUserHome(), screenLog);
+        NetworkMonitor monitor = null;
+        ConnectionWatchdog watchdog = null;
         try {
             logger.onInfo("[step] Starting the build engine");
             watcher.start();
+            connectionLost = false;
+            ChildProcessReaper.killStaleGradleDaemons();   // a daemon left by an earlier cancelled build must not compete with this one
+            baseline = ChildProcessReaper.snapshot();
+            if (!configuration.isOfflineMode()) {
+                monitor = new NetworkMonitor(context);
+                monitor.start();
+                watchdog = new ConnectionWatchdog(monitor, new Runnable() { @Override public void run() { connectionLost = true; stopBuildProcesses(); } });
+                watchdog.start();
+            }
             BuildProcessRunner runner = new BuildProcessRunner(new BuildProcessRunner.ProcessObserver() {
                 @Override public void onStarted(Process process) { activeProcess = process; }
                 @Override public void onFinished(Process process) { if (activeProcess == process) activeProcess = null; }
@@ -89,6 +107,7 @@ public final class GradleBuildPipeline implements BuildPipeline {
                 @Override public void onError(String message, Throwable cause) { keep(message); screenLog.onError(message, cause); }
             };
             BuildProcessRunner.Result result = runner.run(command, project, 30 * 60, capturing, runtime.buildEnvironment());
+            if (connectionLost) return connectionTimeout();
             if (!cancelled && !result.isSuccessful() && !result.isTimedOut()) {
                 String firstOutput; synchronized (captured) { firstOutput = captured.toString(); }
                 // The project asked for an Android platform or build-tools folder that is not installed. A newer installed platform can
@@ -96,14 +115,17 @@ public final class GradleBuildPipeline implements BuildPipeline {
                 // AGP words it either as "Failed to install the following Android SDK packages" or, when the SDK folder simply has no
                 // matching platform, "Failed to find target with hash string 'android-36'". Both are answered the same way.
                 if ((firstOutput.contains("Failed to install the following Android SDK packages") || firstOutput.contains("Failed to find target with hash string")
+                            || firstOutput.contains("Failed to find Build Tools revision")
                             || firstOutput.contains("is corrupted. Remove and install again") || (firstOutput.contains("Build-tool ") && firstOutput.contains(" is missing ")))
                         && AndroidSdkLayout.provideMissing(context.getFilesDir(), firstOutput, new ScreenLogger(logger)) > 0) {
+                    ChildProcessReaper.killNew(baseline);   // nothing of the failed run may still be alive when the second run starts
                     logger.onInfo("[step] Preparing the Android SDK");
                     logger.onWarning("The project asked for Android SDK packages that are not installed. They were provided from the installed platform; building again.");
                     logger.onInfo("[step] Starting the build engine");
                     result = runner.run(command, project, 30 * 60, logger, runtime.buildEnvironment());
                 }
             }
+            if (connectionLost) return connectionTimeout();
             if (cancelled) return new BuildResult(BuildResult.Status.CANCELLED, null, "Gradle build cancelled.");
             if (!result.isSuccessful() && !result.isTimedOut()) logger.onWarning("If the log shows checksum or 'Could not read' cache errors, clear the Gradle dependency cache and rebuild online.");
             if (!result.isSuccessful()) return failed(result.isTimedOut()
@@ -131,7 +153,26 @@ public final class GradleBuildPipeline implements BuildPipeline {
         } catch (Exception exception) {
             logger.onError("Gradle execution error: " + exception.getClass().getSimpleName() + ": " + exception.getMessage(), exception);
             return failed("Could not run Gradle: " + exception.getMessage());
-        } finally { activeProcess = null; watcher.finish(); }
+        } finally {
+            if (watchdog != null) watchdog.finish();
+            if (monitor != null) monitor.stop();
+            if (baseline != null) ChildProcessReaper.killNew(baseline);   // no Gradle JVM is left behind, whatever way the build ended
+            activeProcess = null;
+            watcher.finish();
+        }
+    }
+
+    /** Stops the Gradle launcher and every process it started (the forked daemon), not only the launcher. */
+    private void stopBuildProcesses() {
+        ChildProcessReaper.Snapshot before = baseline;
+        if (before != null) ChildProcessReaper.killNew(before);
+        Process process = activeProcess;
+        if (process != null) { process.destroy(); if (process.isAlive()) process.destroyForcibly(); }
+    }
+
+    private static BuildResult connectionTimeout() {
+        return failed(NetworkMonitor.CONNECTION_TIMEOUT_LABEL + " The internet connection was lost while the build was running. The build was stopped and its "
+            + "processes were cleaned up; libraries that were already downloaded are kept. Press Retry when you are back online.");
     }
 
     /**
@@ -345,5 +386,5 @@ public final class GradleBuildPipeline implements BuildPipeline {
         return error;
     }
     private static BuildResult failed(String message) { return new BuildResult(BuildResult.Status.FAILED, null, message); }
-    @Override public void cancel() { cancelled = true; GradleRuntimeManager manager = runtimeManager; if (manager != null) manager.cancel(); Process process = activeProcess; if (process != null) process.destroy(); }
+    @Override public void cancel() { cancelled = true; GradleRuntimeManager manager = runtimeManager; if (manager != null) manager.cancel(); stopBuildProcesses(); }
 }
