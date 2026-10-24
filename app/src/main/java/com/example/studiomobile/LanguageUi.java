@@ -60,6 +60,15 @@ public final class LanguageUi {
 
     // Build
     public static final String BUILD_BUSY = "A build is already running";
+    public static final String CONNECTION_TIMEOUT_TITLE = "Connection Timeout";
+    public static final String RETRY = "Retry";
+    public static final String RETRY_EXPIRED = "The retry time ran out. Start the build again.";
+    public static final String RETRY_STILL_OFFLINE = "Still offline. Connect to the internet, then press Retry.";
+    public static String connectionTimeoutMessage(long seconds) {
+        long minutes = Math.max(1, (seconds + 59) / 60);
+        return "The internet connection was lost, so the build was stopped and cleaned up. Libraries that were already downloaded are kept.\n\n"
+            + "Press Retry when you are back online. Retry stays available for about " + minutes + (minutes == 1 ? " minute." : " minutes.");
+    }
     public static final String BATTERY_TITLE = "Keep builds running with the screen off?";
     public static final String BATTERY_MESSAGE = "Large projects can take a long time to build. Some phones stop apps that run in the background, and the build is lost. "
         + "Allow Studio Mobile to ignore battery optimization so a build can finish while the screen is off. You can change this any time in the phone's battery settings.";

@@ -1782,7 +1782,11 @@ public class MainActivity extends AppCompatActivity {
     /** Called on the UI thread whenever the build service changes state (started from the screen or from MCP). */
     private void onBuildStateChanged(ProjectBuildService.State state) {
         renderBuildState();
-        if (state == ProjectBuildService.State.FAILED) { showChecksumFailure(buildService.takeChecksumFailure()); return; }
+        if (state == ProjectBuildService.State.FAILED) {
+            if (buildService.takeConnectionTimeout()) { showConnectionTimeout(); return; }
+            showChecksumFailure(buildService.takeChecksumFailure());
+            return;
+        }
         if (state != ProjectBuildService.State.SUCCESS) return;
         if (buildService.wasBundle()) {
             File aab = buildService.getLastAab();
@@ -1801,6 +1805,21 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /** A library failed its SHA check (or the project's checksums.properties is wrong): say so in a dialog, with the values to compare. */
+    /** The build stopped because the connection was lost: Retry is offered for a limited time so the screen is never left waiting. */
+    private void showConnectionTimeout() {
+        long left = buildService.getRetryRemainingSeconds();
+        if (left <= 0) return;
+        new MaterialAlertDialogBuilder(this).setTitle(LanguageUi.CONNECTION_TIMEOUT_TITLE).setMessage(LanguageUi.connectionTimeoutMessage(left))
+            .setPositiveButton(LanguageUi.RETRY, (d, w) -> {
+                long id = buildService.retry();
+                if (id == ProjectBuildService.RETRY_EXPIRED) toast(LanguageUi.RETRY_EXPIRED);
+                else if (id == ProjectBuildService.RETRY_OFFLINE) { toast(LanguageUi.RETRY_STILL_OFFLINE); showConnectionTimeout(); }
+                else if (id == ProjectBuildService.RETRY_BUSY) toast(LanguageUi.BUILD_BUSY);
+                else renderBuildState();
+            })
+            .setNegativeButton(LanguageUi.CLOSE, null).show();
+    }
+
     private void showChecksumFailure(ChecksumFailure failure) {
         if (failure == null) return;
         MaterialAlertDialogBuilder dialog = new MaterialAlertDialogBuilder(this).setTitle(failure.title()).setMessage(failure.details())
