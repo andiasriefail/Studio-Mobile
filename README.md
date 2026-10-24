@@ -1457,11 +1457,4 @@ Studio Mobile dirilis di bawah **PolyForm Noncommercial License 1.0.0** (`PolyFo
 | Diubah, termasuk memperbaiki bug | Disebarkan sebagai bagian dari layanan atau produk komersial |
 | Disebarkan ulang untuk tujuan non-komersial | |
 
-Untuk izin pemakaian komersial, hubungi pemilik proyek.
-
-Catatan:
-
-- Ini lisensi **source-available**, bukan open source menurut definisi OSI, karena melarang pemakaian komersial
-- Salinan yang diperoleh sebelum 2026-10-24 di bawah BSD 3-Clause tetap berlaku di bawah lisensi itu untuk salinan tersebut
-- Komponen pihak ketiga yang dipakai Studio Mobile (misalnya Node.js, CPython, Dart, NDK, dan library lain) tetap memakai lisensinya masing-masing
-- Cara berkontribusi dan syaratnya (dalam bahasa Inggris) ada di [CONTRIBUTING.md](CONTRIBUTING.md)
+[CONTRIBUTING.md](CONTRIBUTING.md)
