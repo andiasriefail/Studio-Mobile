@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write   # needed to create the GitHub Release
 
 jobs:
   build:
@@ -313,10 +313,30 @@ jobs:
               exit 1
             fi
           done
+      - name: Rename the APK to Studio-Mobile.apk
+        run: |
+          set -euo pipefail
+          apk=$(find app/build/outputs/apk/debug -name '*.apk' | head -n 1)
+          [ -n "$apk" ] || { echo "No APK found to rename" >&2; exit 1; }
+          mkdir -p dist
+          cp "$apk" dist/Studio-Mobile.apk
+          ls -l dist
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
           name: Studio Mobile
-          path: app/build/outputs/apk/debug/*.apk
+          path: dist/Studio-Mobile.apk
           if-no-files-found: error
           retention-days: 14
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/.*versionName *= *"\([^"]*\)".*/\1/p' app/build.gradle | head -n 1)
+          tag="v${version:-0.0.0}-build.${{ github.run_number }}"
+          gh release create "$tag" dist/Studio-Mobile.apk \
+            --target "${{ github.sha }}" \
+            --title "Studio Mobile $tag" \
+            --generate-notes
+          echo "Released $tag"
