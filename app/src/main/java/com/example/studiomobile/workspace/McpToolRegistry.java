@@ -80,7 +80,7 @@ public final class McpToolRegistry {
 
     private void registerTools() {
         tools.add(new ToolSpec("get_studio_limits", "Studio Mobile limits",
-            "Returns what Studio Mobile can and cannot build (Java up to 21, Android up to 16 / API 36, supported Gradle features). Read this before changing build files.",
+            "Returns what Studio Mobile can and cannot build (Java up to " + McpLimits.JAVA_LEVEL + ", Android up to " + McpLimits.MAX_ANDROID_VERSION + " / API " + McpLimits.MAX_ANDROID_API + ", supported Gradle features). Read this before changing build files.",
             false, false, schema().build()));
 
         tools.add(new ToolSpec("get_toolchain_info", "Installed toolchain",
@@ -155,7 +155,7 @@ public final class McpToolRegistry {
             "Checks the syntax of ONE file without running it: .py, .dart, .js, .c, .cc, .cpp, .cxx, .h, .hpp. Never executes your code. "
                 + "Answers 'RESULT: OK', 'RESULT: SYNTAX ERRORS' (file and line) or 'RESULT: NOT CHECKED' (with the reason). "
                 + "Python, Dart and C/C++ work only on arm64-v8a phones (see get_toolchain_info); on other phones the answer is NOT CHECKED and you must tell the user, not try another way. "
-                + "JavaScript is parsed with Rhino (ES6) on every phone. Java, Kotlin, XML and Gradle files are not covered: only the user's Build checks them.",
+                + "JavaScript is parsed with node --check on every phone (.js files as CommonJS). Java, Kotlin, XML and Gradle files are not covered: only the user's Build checks them.",
             false, false, schema()
                 .string("project", "Project name.", true)
                 .string("path", "File path relative to the project root.", true)
@@ -371,7 +371,7 @@ public final class McpToolRegistry {
         File projectsRoot = files.getProjectsRoot();
         File appFiles = toolsDirectory.getParentFile();
         File appData = appFiles == null ? null : appFiles.getParentFile();   // holds files/ and cache/
-        File studioRoot = projectsRoot.getParentFile();                      // holds projects, My Apk, local libs, error logs
+        File studioRoot = projectsRoot.getParentFile();                      // holds projects, My Application, local libs, error logs
         result = replacePath(result, projectsRoot, "<projects>");
         result = replacePath(result, appFiles, "<app>");
         result = replacePath(result, appData, "<app-data>");

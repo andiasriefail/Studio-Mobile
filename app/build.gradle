@@ -1,3 +1,9 @@
+import com.android.build.api.instrumentation.AsmClassVisitorFactory
+import com.android.build.api.instrumentation.ClassContext
+import com.android.build.api.instrumentation.ClassData
+import com.android.build.api.instrumentation.FramesComputationMode
+import com.android.build.api.instrumentation.InstrumentationParameters
+import com.android.build.api.instrumentation.InstrumentationScope
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.ClassWriter
@@ -112,6 +118,40 @@ class RuntimeVersionMethodVisitor extends MethodVisitor {
     }
 }
 
+/**
+ * The Kotlin compiler (kotlin-compiler-embeddable, org.jetbrains.kotlin.*, including the shaded IntelliJ code in it) uses java.lang.management
+ * (ManagementFactory, ThreadMXBean, MemoryMXBean, ...), which Android does not have. Without this, every Kotlin compile in the app fails with
+ * "NoClassDefFoundError: Failed resolution of: Ljava/lang/management/ManagementFactory;" (the Run window of a .kt file, and Kotlin sources in a build).
+ *
+ * This AGP class transformer rewrites, while the app is built, every reference to those types inside org.jetbrains.kotlin.* to the stand-ins in
+ * com.example.studiomobile.compat.management. Other libraries and the app's own code are left alone. Unlike patchEcj it keeps the normal
+ * dependency graph, so kotlin-stdlib and the other transitive jars of the compiler are still resolved by Gradle.
+ */
+class ManagementStubs {
+    static final String SHIM_PACKAGE = 'com/example/studiomobile/compat/management/'
+    // Only types that have a stand-in. Anything else is left untouched.
+    static final List<String> TYPES = ['ManagementFactory', 'ThreadMXBean', 'MemoryMXBean', 'MemoryUsage', 'GarbageCollectorMXBean',
+                                       'RuntimeMXBean', 'OperatingSystemMXBean', 'ClassLoadingMXBean']
+
+    static Map<String, String> mapping() {
+        Map<String, String> map = new HashMap<>()
+        for (String type : TYPES) map.put('java/lang/management/' + type, SHIM_PACKAGE + type)
+        return map
+    }
+}
+
+abstract class KotlinManagementClassVisitorFactory implements AsmClassVisitorFactory<InstrumentationParameters.None> {
+    @Override
+    ClassVisitor createClassVisitor(ClassContext classContext, ClassVisitor nextClassVisitor) {
+        return new ClassRemapper(nextClassVisitor, new SimpleRemapper(ManagementStubs.mapping()))
+    }
+
+    @Override
+    boolean isInstrumentable(ClassData classData) {
+        return classData.className.startsWith('org.jetbrains.kotlin.')
+    }
+}
+
 android {
     namespace = "com.example.studiomobile"
     compileSdk = 37
@@ -150,6 +190,14 @@ android {
                 "META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA", "license/*"
             ]
         }
+    }
+}
+
+androidComponents {
+    onVariants(selector().all()) { variant ->
+        // Applies to the app and to its dependencies; the transformer itself only touches org.jetbrains.kotlin.* (see above).
+        variant.instrumentation.transformClassesWith(KotlinManagementClassVisitorFactory, InstrumentationScope.ALL) { params -> }
+        variant.instrumentation.setAsmFramesComputationMode(FramesComputationMode.COPY_FRAMES)
     }
 }
 
@@ -193,8 +241,8 @@ dependencies {
     implementation libs.build.bouncycastle
     // .tar.xz extraction (Android-host NDK archives), see SecureTarExtractor
     implementation libs.build.xz
-    // JavaScript runner (Rhino 1.9.1: pure Java, runs on any ABI), see JavaScriptRunner
-    implementation libs.build.rhino
+    // Password-protected project ZIPs (ZipCrypto + AES), see ProjectZipImporter
+    implementation libs.build.zip4j
     // QuickJS runs Sucrase to turn JSX/TypeScript into JavaScript during a build (32-bit and 64-bit), see QuickJsSucraseTranspiler
     implementation libs.build.quickjs
 

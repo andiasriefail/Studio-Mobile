@@ -106,10 +106,84 @@ public class GradleDependencyParserTest {
         assertEquals("androidx.core:core:1.13.1", coordinates(parse("    implementation libs.androidx.core"), 0));
     }
 
-    @Test public void unsupportedRangeIsSkippedWithAReason() throws IOException {
+    @Test public void rangeFromTheCatalogIsKeptForTheResolver() throws IOException {
         GradleDependencyParser parser = parse("    implementation libs.ranged");
+        assertEquals(1, parser.declarations.size());
+        assertEquals("x:ranged:[1.0,2.0)", coordinates(parser, 0));
+        assertTrue(parser.skipped.isEmpty());
+    }
+
+    // ---- dynamic versions, classifiers, artifact-only
+
+    @Test public void dynamicVersionsAreKeptForTheResolver() throws IOException {
+        GradleDependencyParser parser = parse("    implementation(\"g:a:1.+\")\n    implementation(\"g:b:latest.release\")\n    implementation(\"g:c:[1.0,2.0)\")");
+        assertEquals(3, parser.declarations.size());
+        assertEquals("g:a:1.+", coordinates(parser, 0));
+        assertEquals("g:b:latest.release", coordinates(parser, 1));
+        assertEquals("g:c:[1.0,2.0)", coordinates(parser, 2));
+        assertTrue(parser.skipped.isEmpty());
+    }
+
+    @Test public void unsupportedDynamicVersionAndVariableAreSkippedWithAReason() throws IOException {
+        GradleDependencyParser parser = parse("    implementation(\"g:a:latest.integration\")\n    implementation(\"g:b:$ver\")");
         assertTrue(parser.declarations.isEmpty());
-        assertTrue(parser.warnings.toString().contains("range"));
+        assertEquals(2, parser.skipped.size());
+        assertTrue(parser.skipped.get(0).contains("cannot be resolved"));
+        assertTrue(parser.skipped.get(1).contains("variable"));
+    }
+
+    @Test public void rangeMayBeWrittenWithSpacesAndReversedBrackets() throws IOException {
+        GradleDependencyParser parser = parse("    implementation(\"g:a:[1.0, 2.0)\")\n    implementation(\"g:b:]1.2, 1.5]\")\n    implementation(\"g:c:[1.1, 2.0[\")");
+        assertEquals(3, parser.declarations.size());
+        assertEquals("g:a:[1.0,2.0)", coordinates(parser, 0));
+        assertEquals("g:b:]1.2,1.5]", coordinates(parser, 1));
+        assertEquals("g:c:[1.1,2.0[", coordinates(parser, 2));
+        assertTrue(parser.skipped.isEmpty());
+    }
+
+    @Test public void strictVersionNotationUsesThePreferredVersionOrTheStrictOne() throws IOException {
+        GradleDependencyParser parser = parse("    implementation(\"g:a:1.7.15!!\")\n    implementation(\"g:b:[1.7, 1.8[!!1.7.25\")");
+        assertEquals("g:a:1.7.15", coordinates(parser, 0));
+        assertEquals("g:b:1.7.25", coordinates(parser, 1));
+    }
+
+    @Test public void kotlinDslBuildFileIsReadTheSameWay() throws IOException {
+        write("app/build.gradle.kts", "dependencies {\n    implementation(libs.androidx.appcompat)\n    implementation(\"g:a:1.+\")\n    implementation(\"g:b:2.0:tests@jar\")\n}\n");
+        GradleDependencyParser parser = GradleDependencyParser.parse(project, new File(project, "app"));
+        assertEquals("androidx.appcompat:appcompat:1.7.0", coordinates(parser, 0));
+        assertEquals("g:a:1.+", coordinates(parser, 1));
+        assertEquals("tests", parser.declarations.get(2).classifier);
+        assertEquals("jar", parser.declarations.get(2).extension);
+        assertTrue(parser.skipped.isEmpty());
+    }
+
+    @Test public void classifierIsReadFromTheFourthPart() throws IOException {
+        GradleDependencyParser parser = parse("    implementation(\"g:a:1.0:jdk15\")");
+        assertEquals(1, parser.declarations.size());
+        assertEquals("jdk15", parser.declarations.get(0).classifier);
+        assertEquals("", parser.declarations.get(0).extension);
+        assertEquals("1.0", parser.declarations.get(0).version);
+    }
+
+    @Test public void artifactOnlyExtensionIsReadAfterTheAt() throws IOException {
+        GradleDependencyParser parser = parse("    implementation(\"g:a:1.0@aar\")\n    implementation(\"g:b:2.0:tests@jar\")");
+        assertEquals(2, parser.declarations.size());
+        assertEquals("1.0", parser.declarations.get(0).version);
+        assertEquals("aar", parser.declarations.get(0).extension);
+        assertEquals("tests", parser.declarations.get(1).classifier);
+        assertEquals("jar", parser.declarations.get(1).extension);
+    }
+
+    @Test public void extensionThatIsNotJarOrAarIsSkipped() throws IOException {
+        GradleDependencyParser parser = parse("    implementation(\"g:a:1.0@zip\")");
+        assertTrue(parser.declarations.isEmpty());
+        assertTrue(parser.skipped.get(0).contains("only jar and aar"));
+    }
+
+    @Test public void tooManyPartsAreSkipped() throws IOException {
+        GradleDependencyParser parser = parse("    implementation(\"g:a:1.0:c:extra\")");
+        assertTrue(parser.declarations.isEmpty());
+        assertEquals(1, parser.skipped.size());
     }
 
     // ---- platform / BOM declarations

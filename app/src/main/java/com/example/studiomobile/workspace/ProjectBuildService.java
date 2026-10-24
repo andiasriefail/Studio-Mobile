@@ -144,27 +144,90 @@ public final class ProjectBuildService {
     /** Whole log of the current or most recent build. */
     public String getLog() { synchronized (lock) { return log.toString(); } }
 
+    /** The Build screen log without line wrapping (what Copy log copies). */
+    public String getDisplayLog() { return getDisplayLog(0); }
+
     /**
-     * The log for the Build screen, one line per step or detail: "[time since start] text  (how long it took)". The running step
+     * The log for the Build screen, one entry per step or detail: "[time since start] text  (how long it took)". The running step
      * shows its time so far. Steps keep their lines for the whole build, so the time of every earlier step stays visible.
+     *
+     * The text always starts in the same column, like a book or a code block. With [columns] greater than 0 a long entry is wrapped
+     * at that width and every following line starts under the first letter of the text, never under the time stamp. The duration
+     * stays at the end of the entry's last line.
      */
-    public String getDisplayLog() {
+    public String getDisplayLog(int columns) {
         synchronized (lock) {
             long now = System.currentTimeMillis();
             long start = startedAtMillis;
             long end = finishedAtMillis != 0 ? finishedAtMillis : now;
+            // Every time stamp is padded to the widest one (a build over an hour has "[1:00:00]"), so the text column never moves.
+            int stampWidth = 0;
+            for (Entry e : entries) if (e.stamped) stampWidth = Math.max(stampWidth, clock(e.at - start).length() + 2);
+            if (stampWidth == 0) stampWidth = 7;
+            String gutter = spaces(stampWidth + 1);
             StringBuilder out = new StringBuilder();
             for (int i = 0; i < entries.size(); i++) {
                 Entry e = entries.get(i);
                 if (out.length() > 0) out.append('\n');
-                if (!e.stamped) { out.append("         ").append(e.text); continue; }
-                out.append('[').append(clock(e.at - start)).append("] ");
-                if (e.kind == DETAIL) out.append("  ");
-                out.append(e.text);
-                if (e.kind != MESSAGE) out.append("  (").append(clock(nextStart(i, end) - e.at)).append(')');
+                String first;
+                if (e.stamped) {
+                    String stamp = "[" + clock(e.at - start) + "]";
+                    first = stamp + spaces(stampWidth + 1 - stamp.length());
+                } else first = gutter;
+                String duration = e.stamped && e.kind != MESSAGE ? "(" + clock(nextStart(i, end) - e.at) + ")" : "";
+                out.append(wrapEntry(first, gutter, e.kind == DETAIL ? "  " + e.text : e.text, duration, columns));
             }
             return out.toString();
         }
+    }
+
+    private static String spaces(int count) {
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < count; i++) out.append(' ');
+        return out.toString();
+    }
+
+    /**
+     * One entry as text. [first] starts the first line (the padded time stamp), [indent] starts every other line. Text that begins
+     * with spaces (details, stack traces) keeps that indentation on the lines it wraps into. Breaks happen at spaces; a word longer
+     * than the line is cut. The duration stays on the last line when it fits, otherwise it gets a line of its own under the text.
+     */
+    static String wrapEntry(String first, String indent, String text, String duration, int columns) {
+        String tail = duration.isEmpty() ? "" : "  " + duration;
+        int width = columns - indent.length();
+        if (columns <= 0 || width < 12) return first + text + tail;
+        int lead = 0;
+        while (lead < text.length() && text.charAt(lead) == ' ') lead++;
+        String carry = spaces(Math.min(lead, width / 2));
+        List<String> lines = new ArrayList<>();
+        String rest = text;
+        while (true) {
+            String prefix = lines.isEmpty() ? "" : carry;
+            int room = width - prefix.length();
+            if (rest.length() <= room) { lines.add(prefix + rest); break; }
+            int cut = rest.lastIndexOf(' ', room);
+            int skip;
+            if (cut <= (lines.isEmpty() ? lead : 0)) { cut = room; skip = room; }   // one long word: cut it
+            else {
+                skip = cut;
+                while (skip < rest.length() && rest.charAt(skip) == ' ') skip++;
+                while (cut > 0 && rest.charAt(cut - 1) == ' ') cut--;                // no trailing spaces
+            }
+            lines.add(prefix + rest.substring(0, cut));
+            rest = rest.substring(skip);
+            if (rest.isEmpty()) break;
+        }
+        if (!tail.isEmpty()) {
+            String last = lines.get(lines.size() - 1);
+            if (last.length() + tail.length() <= width) lines.set(lines.size() - 1, last + tail);
+            else lines.add(duration);
+        }
+        StringBuilder out = new StringBuilder();
+        for (int i = 0; i < lines.size(); i++) {
+            if (i > 0) out.append('\n');
+            out.append(i == 0 ? first : indent).append(lines.get(i));
+        }
+        return out.toString();
     }
 
     /** A step lasts until the next step starts; a detail lasts until the next step or detail starts. Falls back to the end time. */
@@ -318,15 +381,25 @@ public final class ProjectBuildService {
     private void run(File project, boolean bundle) {
         State finalState = State.FAILED;
         File copiedProject = null;
+        Throwable crash = null;
+        String failureStage = "BUILD";
         try {
             appendDetail(LanguageUi.BUILD_TOOLCHAIN + "\n" + LocalLibsInstaller.install(appContext));   // internal: stays out of the screen log
             File buildRoot = new File(appContext.getCacheDir(), "user-project-build");
             copiedProject = buildRoot;
             deleteRecursively(buildRoot);
             copyDirectory(project, buildRoot);
-            if (new DebugModeSettings(appContext).isEnabled()) {
-                try { appendInfo(com.example.studiomobile.build.DebugModeInjector.inject(appContext, buildRoot)); }
-                catch (Exception failure) { appendShown("WARNING: Debug Mode could not be added: " + failure.getMessage()); }
+            com.example.studiomobile.build.BuildFailureReport.begin(readAppName(buildRoot, project.getName()));   // error log file is named after the app
+            // A Flutter project (pubspec.yaml with the Flutter SDK dependency) has its own route; the Android crash catcher is not injected into it.
+            com.example.studiomobile.build.flutter.FlutterProjectDetector.Detection flutter = com.example.studiomobile.build.flutter.FlutterProjectDetector.detect(buildRoot);
+            if (!flutter.isFlutter() && new DebugModeSettings(appContext).isEnabled()) {
+                if (bundle) {
+                    // Export AAB is for Google Play: the crash catcher must never be inside a bundle that is published. The saved Debug Mode choice is not changed.
+                    appendShown("Debug Mode is off for Export AAB: the crash catcher is not added to the bundle.");
+                } else {
+                    try { appendInfo(com.example.studiomobile.build.DebugModeInjector.inject(appContext, buildRoot)); }
+                    catch (Exception failure) { appendShown("WARNING: Debug Mode could not be added: " + failure.getMessage()); }
+                }
             }
 
             try { new ProjectKeys(appContext.getFilesDir()).applyToBuild(new File(appContext.getFilesDir(), "build-tools"), project.getName()); }
@@ -337,10 +410,16 @@ public final class ProjectBuildService {
             if (oldApks != null) for (File old : oldApks) deleteRecursively(old);
 
             boolean hasBuildFiles = GradleBuildPipeline.isGradleProject(buildRoot);
-            boolean useGradle = hasBuildFiles && hasGradleRuntime();
-            BuildConfiguration configuration = new BuildConfiguration(buildRoot, apkOutput, !hasBuildFiles, bundle);
-            BuildPipeline pipeline = useGradle ? new GradleBuildPipeline(appContext) : new LocalBuildPipeline(appContext);
+            // Gradle only when the project really needs it (Android Studio project, extra plugins, ...); otherwise the local pipeline builds it.
+            String gradleReason = hasBuildFiles ? com.example.studiomobile.build.GradleNeedDetector.reasonToUseGradle(buildRoot) : null;
+            boolean useGradle = hasBuildFiles && gradleReason != null && hasGradleRuntime();
+            if (flutter.isFlutter()) appendInfo("[internal] Build route: Flutter (pubspec.yaml depends on the Flutter SDK)");
+            else if (hasBuildFiles) appendInfo("[internal] Build route: " + (useGradle ? "Gradle (" + gradleReason + ")" : "local pipeline (no Gradle-only feature found)"));
+            BuildConfiguration configuration = new BuildConfiguration(buildRoot, apkOutput, !hasBuildFiles && !flutter.isFlutter(), bundle);
+            BuildPipeline pipeline = flutter.isFlutter() ? new com.example.studiomobile.build.flutter.FlutterBuildPipeline(appContext)
+                : useGradle ? new GradleBuildPipeline(appContext) : new LocalBuildPipeline(appContext);
             activePipeline = pipeline;
+            failureStage = flutter.isFlutter() ? "FLUTTER BUILD" : useGradle ? "GRADLE BUILD" : "LOCAL BUILD";
 
             BuildLogger logger = new BuildLogger() {
                 @Override public void onInfo(String message) { appendInfo(message); }
@@ -364,7 +443,7 @@ public final class ProjectBuildService {
                     File built = new File(apkOutput, BuildConfiguration.BUNDLE_FILE_NAME);
                     if (!built.isFile()) {
                         succeeded = false;
-                        lastMessage = "The AAB was not created. Export AAB needs the built-in build engine; projects built with Gradle are not supported yet.";
+                        lastMessage = "The AAB was not created. The build finished without producing a bundle; see Build Logs for the reason.";
                         appendShown("ERROR: " + lastMessage);
                     } else {
                         File exported = copyTo(built, new File(StudioStorage.exportAabDir(appContext), appName + ".aab"));
@@ -386,12 +465,14 @@ public final class ProjectBuildService {
         } catch (Throwable error) {
             // Throwable, not Exception: compiler engines can fail with OutOfMemoryError or
             // NoClassDefFoundError on a device, and the state must never stay stuck on RUNNING.
+            crash = error;
             lastMessage = String.valueOf(error.getMessage());
             java.io.StringWriter stackText = new java.io.StringWriter();
             error.printStackTrace(new java.io.PrintWriter(stackText));
             appendShown("ERROR: Build stopped by " + error.getClass().getName() + ": " + error.getMessage() + "\n" + stackText);
         } finally {
             activePipeline = null;
+            if (finalState == State.FAILED) saveFailureReport(failureStage, crash);   // every failed build lands in Studio Mobile/Build Error Logs
             long endedAt = System.currentTimeMillis();
             finishedAtMillis = endedAt;
             showOnly("Total build time: " + clock(endedAt - startedAtMillis));   // the whole build, from the first step to the result
@@ -403,6 +484,16 @@ public final class ProjectBuildService {
             // The copy of the project is only needed while building; removing it here keeps the app's cache from growing with every build.
             if (copiedProject != null) com.example.studiomobile.build.BuildCacheCleaner.deleteTree(copiedProject);
         }
+    }
+
+    /** Writes the full log of a failed build to Studio Mobile/Build Error Logs (one file per app: <app name>-error-logs.txt). Never throws. */
+    private void saveFailureReport(String stage, Throwable crash) {
+        try {
+            String detail = lastMessage == null || lastMessage.isEmpty() ? "Build failed." : lastMessage;
+            File report = com.example.studiomobile.build.BuildFailureReport.write(StudioStorage.errorLogsDir(appContext), stage, crash, detail, getLog());
+            if (report != null) appendShown("Full diagnostic report saved to: " + report.getAbsolutePath());
+            else appendShown("WARNING: Could not save the diagnostic report to Build Error Logs.");
+        } catch (Throwable ignored) { /* diagnostics must never hide the real build failure */ }
     }
 
     /** Reads the app_name string of the project; falls back to the project folder name. The result is safe as a file name. */
@@ -500,11 +591,21 @@ public final class ProjectBuildService {
 
     /** After a failed build the screen also gets the engine's last lines, so the real cause is never out of sight. */
     private void appendTechnicalDetails() {
-        String[] lines = getLog().split("\n");
-        int from = Math.max(0, lines.length - 80);
-        StringBuilder out = new StringBuilder("\n--- Technical details (last " + (lines.length - from) + " lines) ---\n");
-        for (int i = from; i < lines.length; i++) out.append(lines[i]).append('\n');
+        // Same lines for APK and AAB builds. Bookkeeping that is written for the log file only (tags, toolchain and catalog notes,
+        // file system paths of the app) is left out; what remains is what the build tool itself reported.
+        List<String> keep = new ArrayList<>();
+        for (String line : getLog().split("\n")) if (!isInternalLine(line)) keep.add(line);
+        int from = Math.max(0, keep.size() - 80);
+        StringBuilder out = new StringBuilder("\n--- Technical details (last " + (keep.size() - from) + " lines) ---\n");
+        for (int i = from; i < keep.size(); i++) out.append(keep.get(i)).append('\n');
         showOnly(out.toString().trim());
+    }
+
+    private static boolean isInternalLine(String line) {
+        String lower = line.trim().toLowerCase(java.util.Locale.ROOT);
+        return lower.isEmpty() || lower.startsWith("[internal]") || lower.startsWith("[step]") || lower.startsWith("[progress]")
+            || lower.startsWith("toolchain install") || lower.startsWith("android.jar api") || lower.startsWith("kotlin-stdlib")
+            || lower.contains("catalog entry") || lower.contains("/data/user/") || lower.contains("gradle-runtime");
     }
 
     private void notifyState(State newState) {
@@ -515,9 +616,14 @@ public final class ProjectBuildService {
 
     private boolean hasGradleRuntime() {
         File files = appContext.getFilesDir();
-        // The java launcher shipped in the APK lets the pipeline install Gradle and a JDK from the catalog on first use.
+        // A java launcher shipped in the APK lets the pipeline install Gradle and a JDK from the catalog on first use. The APK carries
+        // one per JDK major (lib<tool><major>exe.so, e.g. libjava21exe.so), so any major counts; there is no plain libjavaexe.so.
         File nativeDir = new File(appContext.getApplicationInfo().nativeLibraryDir);
-        return new File(nativeDir, "libjavaexe.so").isFile()
+        // The JDK archives are built for API 29 (Android 10) and newer (nlauncher-jre-android-multi, config.env ANDROID_API), so on older phones
+        // the launchers cannot start a JVM and the local pipeline must be used instead of failing inside Gradle.
+        boolean launcherUsable = android.os.Build.VERSION.SDK_INT >= 29
+            && !com.example.studiomobile.build.gradle.JdkLauncherSet.scan(nativeDir).majorsWithJava().isEmpty();
+        return launcherUsable
             || new File(files, "build-tools/gradle/bin/gradle").isFile()
             || new File(files, "gradle/bin/gradle").isFile()
             || new File(files, "gradle-runtime").isDirectory();

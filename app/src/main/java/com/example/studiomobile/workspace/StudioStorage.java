@@ -17,10 +17,11 @@ import java.io.File;
  * <pre>
  * Studio Mobile/
  *   My Project/          every project
- *   My Apk/              APKs saved with "Save APK"
+ *   My Application/      APKs saved with "Save APK"
  *   Export AAB/          App Bundles exported for Google Play
+ *   Icon Google Play Console/<project name>/   the 512x512 store icon of each project (ic_launcher-playstore.png)
  *   Local/local_libs/    downloaded libraries, reused by later builds
- *   Build Error Logs/    the latest build error log (only one is kept)
+ *   Build Error Logs/    one build error log per app (<app name>-error-logs.txt)
  * </pre>
  *
  * Shared storage needs "All files access" (Android 11+) or the storage permission (Android 8-9). Until it is granted, and on
@@ -30,11 +31,15 @@ import java.io.File;
 public final class StudioStorage {
     public static final String ROOT_NAME = "Studio Mobile";
     public static final String PROJECTS = "My Project";
-    public static final String APKS = "My Apk";
+    public static final String APKS = "My Application";
     public static final String LOCAL_LIBS = "Local/local_libs";
     public static final String EXPORT_AAB = "Export AAB";
+    /** One sub-folder per project holding the 512x512 icon that Google Play Console asks for (it is not part of the APK). */
+    public static final String PLAY_ICONS = "Icon Google Play Console";
+    public static final String PLAY_ICON_FILE = "ic_launcher-playstore.png";
     public static final String ERROR_LOGS = "Build Error Logs";
-    /** Crash and freeze reports of Studio Mobile itself. Separate from ERROR_LOGS because a failed build empties that folder. */
+    public static final String GITHUB_ZIPS = "Github Application Zip";
+    /** Crash and freeze reports of Studio Mobile itself. Kept apart from ERROR_LOGS, which only holds build error logs. */
     public static final String APP_CRASH_LOGS = "App Crash Logs";
     public static final int REQUEST_LEGACY_STORAGE = 4101;
 
@@ -66,17 +71,21 @@ public final class StudioStorage {
 
     public static File projectsDir(Context context) { return dir(root(context), PROJECTS); }
     public static File apkDir(Context context) { return dir(root(context), APKS); }
-    /** Studio Mobile/Export AAB, created when first needed. */
+    /** Studio Mobile/Export AAB, created together with the other folders. */
     public static File exportAabDir(Context context) { return dir(root(context), EXPORT_AAB); }
     /** The Studio Mobile folder itself, created when first needed. */
     public static File rootDir(Context context) { File root = root(context); if (!root.isDirectory()) root.mkdirs(); return root; }
+    public static File playIconsDir(Context context) { return dir(root(context), PLAY_ICONS); }
+    /** Studio Mobile/Icon Google Play Console/&lt;project name&gt;. Only a path: nothing is created. */
+    public static File playIconDir(Context context, String projectName) { return new File(playIconsDir(context), projectName); }
     public static File localLibsDir(Context context) { return dir(root(context), LOCAL_LIBS); }
     public static File errorLogsDir(Context context) { return dir(root(context), ERROR_LOGS); }
+    public static File githubZipDir(Context context) { return dir(root(context), GITHUB_ZIPS); }
     public static File appCrashLogsDir(Context context) { return dir(root(context), APP_CRASH_LOGS); }
 
     /** Creates the whole folder layout. Safe to call repeatedly. */
     public static void ensureFolders(Context context) {
-        projectsDir(context); apkDir(context); localLibsDir(context); errorLogsDir(context);
+        projectsDir(context); apkDir(context); exportAabDir(context); localLibsDir(context); errorLogsDir(context); playIconsDir(context); githubZipDir(context);
     }
 
     private static File dir(File parent, String relative) {

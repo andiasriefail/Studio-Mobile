@@ -129,6 +129,43 @@ jobs:
           done
           file "$dest/libpythonexe.so"
           ls -l "$dest"
+      - name: Download Node.js (andiasriefail/node-android-build) and bundle it for every ABI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NODE_MAJOR: '24'
+        run: |
+          set -euo pipefail
+          repo=andiasriefail/node-android-build
+          # Known-good pin for x86_64 (checked when the resolved asset has the same SHA-256 owner release).
+          x64_pinned=487cc205672d5c715a951835421e5eef4e2e3f629183c96ab0761c17a441f10b
+          # release arch  ->  Android ABI folder
+          for pair in arm64:arm64-v8a arm:armeabi-v7a x64:x86_64 ia32:x86; do
+            arch=${pair%%:*}; abi=${pair##*:}
+            tag="node-android-${arch}-${NODE_MAJOR}"
+            echo "== $arch -> $abi (release $tag)"
+            json=$(gh api "repos/$repo/releases/tags/$tag")
+            # Newest asset = highest version in node-android-<arch>-<version>.tar.xz
+            name=$(echo "$json" | jq -r '[.assets[].name | select(test("^node-android-.*\\.tar\\.xz$"))] | sort_by(capture("-(?<v>[0-9]+\\.[0-9]+\\.[0-9]+)\\.tar\\.xz$").v | split(".") | map(tonumber)) | last')
+            [ -n "$name" ] && [ "$name" != null ] || { echo "No tar.xz asset in $tag" >&2; exit 1; }
+            url=$(echo "$json" | jq -r --arg n "$name" '.assets[] | select(.name==$n) | .browser_download_url')
+            digest=$(echo "$json" | jq -r --arg n "$name" '.assets[] | select(.name==$n) | .digest // ""' | sed 's/^sha256://')
+            archive="$RUNNER_TEMP/$name"
+            curl -fsSL "$url" -o "$archive"
+            sum=$(sha256sum "$archive" | cut -d' ' -f1)
+            echo "$name sha256=$sum"
+            if [ -n "$digest" ] && [ "$sum" != "$digest" ]; then echo "SHA-256 mismatch for $name (release says $digest)" >&2; exit 1; fi
+            if [ "$arch" = x64 ] && [ "$sum" != "$x64_pinned" ]; then echo "::warning::x64 asset $name differs from the pinned SHA-256 ($x64_pinned). Update x64_pinned if this is a new Node version."; fi
+            dir="$RUNNER_TEMP/node-$arch"; rm -rf "$dir"; mkdir -p "$dir"
+            tar -xJf "$archive" -C "$dir"
+            exe=$(find "$dir" -path '*/bin/node' | head -n 1)
+            [ -n "$exe" ] || { echo "bin/node not found in $name" >&2; find "$dir" -maxdepth 3 | head -n 40 >&2; exit 1; }
+            dest="app/src/main/jniLibs/$abi"; mkdir -p "$dest"
+            # Android 10+ only executes files from the native library directory, so the binary ships as lib<name>.so.
+            cp "$(readlink -f "$exe")" "$dest/libnodeexe.so"
+            chmod 755 "$dest/libnodeexe.so"
+            file "$dest/libnodeexe.so"
+          done
+          ls -l app/src/main/jniLibs/*/libnodeexe.so
       - name: Cache the Dart SDK archive
         uses: actions/cache@v4
         with:
@@ -165,60 +202,69 @@ jobs:
           chmod 755 "$dest/libdartaotruntime.so" "$dest/libdartvm.so"
           file "$dest/libdartaotruntime.so" "$dest/libdartvm.so"
           python3 tools/pin_dart_catalog.py
-      - name: Bundle the java launcher (fork JRE release) and register the JDK + Gradle in the catalog
+      - name: Cache the Flutter SDK archive
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/flutter-sdk-cache
+          key: flutter-sdk-${{ hashFiles('tools/flutter-sdk.json') }}
+      - name: Bundle the Flutter executables and pin the Flutter SDK
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          jdk_repo=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['repo'])")
-          # OWNER is the placeholder in tools/gradle-jdk.json; by default the JRE fork lives next to this repository.
-          if [ "${jdk_repo%%/*}" = "OWNER" ]; then jdk_repo="${GITHUB_REPOSITORY_OWNER}/${jdk_repo#*/}"; fi
-          tag=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['tag'])")
-          export JDK_REPO="$jdk_repo"
+          # The Flutter SDK archive is made and released by the "Flutter SDK slim release" workflow (tools/flutter-sdk.json names repo, tag, asset and hash).
+          field() { python3 -c "import json,sys; print(json.load(open('tools/flutter-sdk.json'))[sys.argv[1]])" "$1"; }
+          flutter_repo=$(field repo); tag=$(field tag); name=$(field asset); expected=$(field sha256)
+          cache="$RUNNER_TEMP/flutter-sdk-cache"
+          mkdir -p "$cache"
+          if [ -f "$cache/$name" ]; then
+            echo "Using the cached $name"
+          else
+            gh release download "$tag" --pattern "$name" --dir "$cache" --repo "$flutter_repo"
+          fi
+          # The checksum is verified every time, so a damaged or outdated cache entry can never be used.
+          sum=$(sha256sum "$cache/$name" | cut -d' ' -f1)
+          [ "$sum" = "$expected" ] || { rm -f "$cache/$name"; echo "SHA-256 mismatch for $name from $flutter_repo: $sum (tools/flutter-sdk.json expects $expected)" >&2; exit 1; }
+          # Android 10+ only runs executables from the native library directory, so these three leave the archive and ship inside the APK.
+          dest=app/src/main/jniLibs/arm64-v8a
+          mkdir -p "$dest"
+          python3 - "$cache/$name" "$dest" <<'PY'
+          import posixpath, shutil, sys, tarfile
+          archive, dest = sys.argv[1], sys.argv[2]
+          wanted = {
+              "flutter/bin/cache/dart-sdk/bin/dart": "libflutterdart.so",
+              "flutter/bin/cache/artifacts/engine/linux-arm64/gen_snapshot": "libgensnapshot.so",
+              "flutter/bin/cache/artifacts/engine/linux-arm64/impellerc": "libimpellerc.so",
+          }
+          with tarfile.open(archive, "r:xz") as tar:
+              members = {m.name: m for m in tar.getmembers()}
+              for name, out in wanted.items():
+                  member, hops = members.get(name), 0
+                  while member is not None and member.issym() and hops < 8:
+                      member = members.get(posixpath.normpath(posixpath.join(posixpath.dirname(member.name), member.linkname)))
+                      hops += 1
+                  if member is None or not member.isfile():
+                      sys.exit("Not a regular file in the archive: " + name)
+                  with tar.extractfile(member) as source, open(dest + "/" + out, "wb") as target:
+                      shutil.copyfileobj(source, target)
+                  print("extracted", name, "->", out, member.size, "bytes")
+          PY
+          chmod 755 "$dest/libflutterdart.so" "$dest/libgensnapshot.so" "$dest/libimpellerc.so"
+          file "$dest/libflutterdart.so" "$dest/libgensnapshot.so" "$dest/libimpellerc.so"
+          python3 tools/pin_flutter_catalog.py
+      - name: Resolve the JDKs and Gradle distributions (tools/gradle-jdk.json) and register them in the catalog
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          # Everything (repo, tag, JDK majors, Gradle versions, which JDK is bundled in the APK, the
+          # java/javac/jmod/jar/jlink launchers of every JDK major) is read from tools/gradle-jdk.json; nothing is hard-coded in this workflow.
           resolved="$RUNNER_TEMP/gradle-jdk-resolved.json"
-          python3 - "$resolved" <<'PY'
-          import json, sys
-          json.dump({"jdk": {}, "gradle": {}}, open(sys.argv[1], "w"))
-          PY
-          record() { python3 - "$resolved" "$@" <<'PY'
-          import json, sys
-          path, kind, key, sha, size = sys.argv[1:6]
-          data = json.load(open(path))
-          if kind == "jdk": data["jdk"][key] = {"sha256": sha, "bytes": int(size)}
-          else: data["gradle"] = {"sha256": sha, "bytes": int(size)}
-          json.dump(data, open(path, "w"))
-          PY
-          }
-          mkdir -p "$RUNNER_TEMP/jre"
-          bundle_abi() {
-            abi="$1"; asset="$2"; machine="$3"
-            if ! gh release download "$tag" --repo "$jdk_repo" --pattern "$asset" --pattern "$asset.sha256" --dir "$RUNNER_TEMP/jre" --clobber; then
-              echo "::warning::$asset is not in release $tag of $jdk_repo; $abi gets no on-device JDK."; return 0
-            fi
-            expected=$(cut -d' ' -f1 "$RUNNER_TEMP/jre/$asset.sha256")
-            sum=$(sha256sum "$RUNNER_TEMP/jre/$asset" | cut -d' ' -f1)
-            [ "$sum" = "$expected" ] || { echo "SHA-256 mismatch for $asset ($sum, release says $expected)" >&2; exit 1; }
-            dest="app/src/main/jniLibs/$abi"
-            mkdir -p "$dest"
-            tar -xJf "$RUNNER_TEMP/jre/$asset" -C "$RUNNER_TEMP/jre" "jre-21/bin/java"
-            cp "$RUNNER_TEMP/jre/jre-21/bin/java" "$dest/libjavaexe.so"
-            chmod 755 "$dest/libjavaexe.so"
-            readelf -h "$dest/libjavaexe.so" | grep -q "Machine:.*$machine" || { echo "libjavaexe.so for $abi is not a $machine binary" >&2; exit 1; }
-            echo "launcher for $abi:"; readelf -d "$dest/libjavaexe.so" | grep -E 'NEEDED|RUNPATH' || true
-            record jdk "$abi" "$sum" "$(stat -c %s "$RUNNER_TEMP/jre/$asset")"
-          }
-          bundle_abi arm64-v8a "$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['assets']['arm64-v8a'])")" AArch64
-          bundle_abi armeabi-v7a "$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['jdk']['assets']['armeabi-v7a'])")" ARM
-          # Gradle distribution: verify against the checksum Gradle publishes, then pin it in the catalog.
-          gurl=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['gradle']['url'])")
-          gsha=$(python3 -c "import json; print(json.load(open('tools/gradle-jdk.json'))['gradle']['sha256_url'])")
-          curl -fsSL "$gurl" -o "$RUNNER_TEMP/gradle.zip"
-          expected=$(curl -fsSL "$gsha" | tr -d '[:space:]')
-          sum=$(sha256sum "$RUNNER_TEMP/gradle.zip" | cut -d' ' -f1)
-          [ "$sum" = "$expected" ] || { echo "SHA-256 mismatch for the Gradle distribution ($sum, published $expected)" >&2; exit 1; }
-          record gradle - "$sum" "$(stat -c %s "$RUNNER_TEMP/gradle.zip")"
-          cat "$resolved"; echo
+          python3 tools/resolve_gradle_jdk.py "$resolved"
           python3 tools/pin_gradle_jdk_catalog.py "$resolved"
+          for abi in arm64-v8a armeabi-v7a; do
+            ls app/src/main/jniLibs/$abi/libjava[0-9]*exe.so > /dev/null 2>&1 || echo "::warning::No libjava<major>exe.so for $abi: Gradle projects cannot be built on those phones."
+          done
       - name: Build the JSX/TypeScript transpiler (Sucrase, bundled for QuickJS)
         run: |
           set -euo pipefail
@@ -259,26 +305,18 @@ jobs:
           echo "---- native libraries per ABI ----"
           unzip -l "$apk" | awk '{print $4}' | grep -E '^lib/[^/]+/.+\.so$' | sort
           for abi in armeabi-v7a arm64-v8a; do
-            if ! unzip -l "$apk" | awk '{print $4}' | grep -E "^lib/$abi/libjavaexe\\.so$" > /dev/null; then
-              echo "::warning::libjavaexe.so is missing for $abi: Gradle projects cannot be built on those phones."
+            if ! unzip -l "$apk" | awk '{print $4}' | grep -E "^lib/$abi/libjava[0-9]+exe\\.so$" > /dev/null; then
+              echo "::warning::No libjava<major>exe.so for $abi: Gradle projects cannot be built on those phones."
             fi
             if ! unzip -l "$apk" | awk '{print $4}' | grep -E "^lib/$abi/.*quickjs.*\.so$" > /dev/null; then
               echo "::error::The QuickJS library is missing for $abi, so JSX/TypeScript builds would crash on those phones."
               exit 1
             fi
           done
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          name: studio-mobile-test-reports
-          path: app/build/reports/tests/
-          if-no-files-found: ignore
-          retention-days: 1
       - name: Upload APK artifact
         uses: actions/upload-artifact@v7
         with:
-          name: studio-mobile-debug-apk
+          name: Studio Mobile
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

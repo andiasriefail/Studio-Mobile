@@ -29,10 +29,12 @@ public final class JavaEntryPoint {
     /** The first class in {@code names} that has an entry point. @throws IllegalStateException with every reason when none has. */
     public static Class<?> locate(ClassLoader loader, List<String> names) {
         StringBuilder problems = new StringBuilder();
+        boolean androidComponent = false;
         for (String name : names) {
             try {
                 Class<?> type = Class.forName(name, false, loader);
                 if (find(type) != null) return type;
+                if (isAndroidComponent(type)) androidComponent = true;
                 problems.append("\n  ").append(name).append(": no main method");
             } catch (ClassNotFoundException missing) {
                 problems.append("\n  ").append(name).append(": not found in the compiled output");
@@ -41,7 +43,14 @@ public final class JavaEntryPoint {
             }
         }
         throw new IllegalStateException("No class with a main method was found. Tried:" + problems
-            + "\nA runnable class needs  public static void main(String[] args)  (or  void main()  in Java 25).");
+            + "\nA runnable class needs  public static void main(String[] args)  (or  void main()  in Java 25)."
+            + (androidComponent ? "\nThis file is an Android component (Activity, Service, ...). It is started by Android, not by main(): use Build to run it as an app." : ""));
+    }
+
+    /** True for an Activity, Service and the like (anything that is an android.content.Context). False where Android is not present, for example in unit tests. */
+    private static boolean isAndroidComponent(Class<?> type) {
+        try { return Class.forName("android.content.Context").isAssignableFrom(type); }
+        catch (ClassNotFoundException | LinkageError notOnAndroid) { return false; }
     }
 
     /**

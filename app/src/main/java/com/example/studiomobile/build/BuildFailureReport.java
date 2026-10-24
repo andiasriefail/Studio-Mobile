@@ -16,6 +16,20 @@ import java.util.UUID;
 public final class BuildFailureReport {
     private BuildFailureReport() { }
 
+    /** Name of the app being built; set once per build so every failure report goes to its own file. */
+    private static volatile String currentApp = "";
+
+    /** Call when a build starts. The error log is then saved as {@code <app name>-error-logs.txt}. */
+    public static void begin(String appName) { currentApp = appName == null ? "" : appName; }
+
+    /** @return {@code <app name>-error-logs.txt}, with characters that are not allowed in file names replaced. */
+    static String fileNameFor(String appName) {
+        String cleaned = appName == null ? "" : appName.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]", "_").trim();
+        if (cleaned.isEmpty() || cleaned.equals(".") || cleaned.equals("..")) cleaned = "build";
+        if (cleaned.length() > 100) cleaned = cleaned.substring(0, 100);
+        return cleaned + "-error-logs.txt";
+    }
+
     public static File write(File outputDirectory, String stage, Throwable failure, String detail) {
         return write(outputDirectory, stage, failure, detail, "");
     }
@@ -24,10 +38,10 @@ public final class BuildFailureReport {
         if (outputDirectory == null) return null;
         try {
             if (!outputDirectory.isDirectory() && !outputDirectory.mkdirs()) return null;
-            // Only the latest error log is kept.
-            File[] old = outputDirectory.listFiles();
-            if (old != null) for (File previous : old) if (previous.isFile()) previous.delete();
-            File report = new File(outputDirectory, "loggeror.txt");
+            // One log per app: a new failure of the same app replaces its old log, logs of other apps stay.
+            File report = new File(outputDirectory, fileNameFor(currentApp));
+            report.delete();
+            new File(outputDirectory, "loggeror.txt").delete();   // old single-file log from earlier versions
             StringWriter stackBuffer = new StringWriter();
             if (failure != null) {
                 try (PrintWriter stackWriter = new PrintWriter(stackBuffer)) { failure.printStackTrace(stackWriter); }
@@ -54,6 +68,12 @@ public final class BuildFailureReport {
                 }
                 if (diagnostic.contains("outofmemoryerror") || diagnostic.contains("failed to allocate")) {
                     writer.write("Memory pressure detected. Close other apps and reduce dependency size; large downloads should be streamed and installed atomically rather than duplicated in memory.\n");
+                }
+                if (diagnostic.contains("/data/.android") || diagnostic.contains("accessdeniedexception")) {
+                    writer.write("Access denied while Gradle/AGP used the default user home (~/.android). Studio Mobile now sets ANDROID_USER_HOME and user.home to app-private storage; if this still appears, check the 'Android user home' line near the top of the log.\n");
+                }
+                if (diagnostic.contains("checksum") || diagnostic.contains("could not read")) {
+                    writer.write("Possible corrupted Gradle dependency cache. Clear the Gradle dependency cache and rebuild online.\n");
                 }
                 writer.write("\nNote: review this report before sharing it; compiler output may contain project paths.\n");
             }

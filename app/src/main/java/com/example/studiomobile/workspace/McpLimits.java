@@ -49,6 +49,9 @@ public final class McpLimits {
             .append("A declared level above ").append(JAVA_LEVEL)
             .append(" (sourceCompatibility, targetCompatibility, JavaVersion, jvmTarget, jvmToolchain) rejects the build, ")
             .append("and so does a local library in libs/ compiled for a newer Java.\n");
+        text.append("- Java ").append(JAVA_LEVEL).append(" features work, including module imports (import module java.base;): Studio Mobile rewrites them into ordinary imports ")
+            .append("(import package.*;) for the build, so plain imports and module imports can both be used. ")
+            .append("Android's android.jar is not a JDK: only packages that exist on Android can be imported.\n");
         text.append("- Android up to version ").append(MAX_ANDROID_VERSION).append(" (API ").append(MAX_ANDROID_API)
             .append("). compileSdk or targetSdk above ").append(MAX_ANDROID_API).append(" is not supported.\n");
         text.append("- Kotlin and Java sources are supported. Annotation processors, Jetpack Compose, custom build variants ")
@@ -60,9 +63,9 @@ public final class McpLimits {
         text.append("- Manifest merging copies library elements but does not support tools:node or tools:replace.\n");
         text.append("- Studio Mobile never generates MainActivity, layouts or sample code. Empty projects stay empty.\n\n");
 
-        text.append("LANGUAGE SUPPORT (read this before you touch Python, Dart, C or C++)\n");
-        text.append("- Java and Kotlin build the app itself (screens, logic, resources) and work on every phone. JavaScript runs on Rhino (ES6, no import/export modules).\n");
-        text.append("- Python, Dart and C/C++ compiled on the phone exist ONLY for arm64-v8a phones. ")
+        text.append("LANGUAGE SUPPORT BY DEVICE (read this before you touch Python, Dart, C or C++)\n");
+        text.append("- Java and Kotlin build the app itself (screens, logic, resources) and work on every phone. JavaScript runs on a real Node.js binary bundled for the phone's own ABI (CommonJS with require; use .mjs for ES modules).\n");
+        text.append("- Python (CPython), Dart and C/C++ compiled on the phone (NDK clang) exist ONLY for arm64-v8a phones. ")
             .append("They do NOT work on 32-bit ARM phones (armeabi-v7a), on x86 phones, or on x86_64 phones that cannot run arm64 code.\n");
         text.append("- What each one is for:\n");
         text.append("  * Python (CPython): runs single .py scripts inside Studio Mobile, for tools, automation and data work. ")
@@ -197,7 +200,7 @@ public final class McpLimits {
                 if (level > MAX_ANDROID_API)
                     errors.add(fileName + " sets compileSdk " + level + ". Studio Mobile supports up to API " + MAX_ANDROID_API + " (Android " + MAX_ANDROID_VERSION + ").");
             } else if (COMPILE_SDK_ANY.matcher(source).find()) {
-                warnings.add(fileName + " sets compileSdk with a variable or expression. Studio Mobile only understands a plain number such as compileSdk = 36.");
+                warnings.add(fileName + " sets compileSdk with a variable or expression. Studio Mobile only understands a plain number such as compileSdk = " + MAX_ANDROID_API + ".");
             }
             Matcher target = TARGET_SDK.matcher(source);
             if (target.find()) {

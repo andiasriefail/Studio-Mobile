@@ -1,11 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="settings_title">Settings</string>
+    <string name="settings_debug_title">Studio Mobile Debug Mode</string>
+    <string name="settings_debug_desc">Show a report screen when Studio Mobile crashes, freezes or is closed by the system. Turn off to hide it.</string>
     <string name="settings_wallpaper_title">Change Wallpaper</string>
-    <string name="settings_wallpaper_desc">Use your own picture behind the code editor.</string>
+    <string name="settings_wallpaper_desc">Use your own picture or a short live video behind the code editor.</string>
     <string name="wallpaper_title">Change Wallpaper</string>
     <string name="wallpaper_none">No wallpaper selected</string>
     <string name="wallpaper_choose">Choose image</string>
+    <string name="exit_confirm_message">Are you sure you want to exit?</string>
+    <string name="exit_confirm_no">No</string>
+    <string name="exit_confirm_yes_save">Yes and Save</string>
+    <string name="wallpaper_choose_video">Choose video</string>
+    <string name="wallpaper_video_title">Live wallpaper (video)</string>
+    <string name="wallpaper_video_hint">Pick a video of up to 60 seconds. It plays muted and looping, only while you are in the code editor. It stops in Home, Preview and Build, and pauses when you leave the app.</string>
+    <string name="wallpaper_video_active">A video wallpaper is active. The preview above shows its first frame.</string>
+    <string name="wallpaper_video_saved">Live wallpaper updated</string>
+    <string name="wallpaper_video_too_long">The video is longer than 60 seconds. Choose a shorter one.</string>
     <string name="wallpaper_remove">Remove</string>
     <string name="wallpaper_dim">Darkness: %1$d%%</string>
     <string name="wallpaper_dim_hint">Higher values make code easier to read on bright pictures.</string>

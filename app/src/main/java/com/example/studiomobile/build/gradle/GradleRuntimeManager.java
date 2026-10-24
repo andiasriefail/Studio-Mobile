@@ -9,7 +9,11 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Resolves everything Gradle needs before it starts: a Gradle distribution matching the project, a
@@ -28,6 +32,7 @@ public final class GradleRuntimeManager {
     private final GradleCacheManager cacheManager;
     private final GradleRuntimeProvisioner provisioner;
     private final File externalJavaHome;
+    private final GradleCompatibilityMatrix matrix;
 
     public GradleRuntimeManager(File filesDirectory, BuildToolCatalog catalog, List<String> supportedAbis, File externalJavaHome) {
         this(filesDirectory, catalog, supportedAbis, externalJavaHome, null);
@@ -39,71 +44,94 @@ public final class GradleRuntimeManager {
         this.provisioner = new GradleRuntimeProvisioner(filesDirectory, catalog, supportedAbis);
         if (assets != null) this.provisioner.setAssets(assets);
         this.externalJavaHome = externalJavaHome;
+        this.matrix = loadMatrix(assets);
+    }
+
+    /** Rules come from assets/build-tools/gradle-compat.json; without that file nothing is cross-checked (never guessed). */
+    private static GradleCompatibilityMatrix loadMatrix(AssetManager assets) {
+        if (assets == null) return GradleCompatibilityMatrix.empty();
+        try (java.io.InputStream input = assets.open("build-tools/gradle-compat.json")) {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream(); byte[] buffer = new byte[8192]; int count;
+            while ((count = input.read(buffer)) != -1) bytes.write(buffer, 0, count);
+            return GradleCompatibilityMatrix.parse(new String(bytes.toByteArray(), java.nio.charset.StandardCharsets.UTF_8));
+        } catch (Exception exception) { return GradleCompatibilityMatrix.empty(); }
     }
     public GradleCacheManager getCacheManager() { return cacheManager; }
     public void cancel() { provisioner.cancel(); }
 
     public Resolution resolve(File project, boolean offline, BuildLogger logger) {
-        GradleProjectRequirements need = GradleProjectRequirements.read(project);
+        GradleProjectRequirements need = GradleProjectRequirements.read(project, matrix);
         logger.onInfo("Project requirements: Gradle " + (need.getRequiredGradleVersion() == null ? "unspecified" : need.getRequiredGradleVersion())
-            + ", AGP " + (need.getAgpVersion() == null ? "unknown" : need.getAgpVersion()) + ", JDK " + need.getMinimumJdk() + "+.");
+            + ", AGP " + (need.getAgpVersion() == null ? "unknown" : need.getAgpVersion()) + ", JDK " + need.getWantedJdk() + "+" + (need.getProjectJavaLevel() > 0 ? " (project Java " + need.getProjectJavaLevel() + ")" : "") + ".");
         if (need.getAgpVersion() != null && !need.isAgpKnown()) logger.onInfo("Android Gradle plugin " + need.getAgpVersion() + " is not in the app's compatibility table; Gradle/JDK versions were not cross-checked.");
-        if (need.getWrapperGradleVersion() != null && need.getRequiredGradleVersion() != null && need.getWrapperGradleVersion().compareTo(need.getRequiredGradleVersion()) < 0)
-            logger.onInfo("The wrapper requests Gradle " + need.getWrapperGradleVersion() + " but the Android Gradle plugin " + need.getAgpVersion() + " needs " + need.getRequiredGradleVersion() + "+; using the newer version.");
         if (!cacheManager.prepare(logger)) return fail("Could not prepare the Gradle user home directory.");
 
-        // 1. Gradle distribution
+        // 1+2. Gradle and JDK are chosen TOGETHER from what the project asks for (wrapper, AGP window, Java level), see GradleToolchainPlanner.
+        File wrapperScript = new File(project, "gradlew"), wrapperJar = new File(project, "gradle/wrapper/gradle-wrapper.jar");
+        boolean wrapperUsable = wrapperScript.isFile() && wrapperJar.isFile();
+        Map<GradleVersion, String> catalogGradle = offline ? new java.util.HashMap<GradleVersion, String>() : provisioner.gradleComponentIds();
+        Set<GradleVersion> gradleAvailable = new TreeSet<>(catalogGradle.keySet());
+        for (GradleRuntimeLocator.GradleInstall candidate : locator.findGradleInstalls()) if (candidate.version != null) gradleAvailable.add(candidate.version);
+        Set<Integer> jdkAvailable = new TreeSet<>();
+        if (!offline) jdkAvailable.addAll(provisioner.jdkComponentMajors());
+        for (GradleRuntimeLocator.JdkInstall candidate : locator.findJdkInstalls(externalJavaHome)) jdkAvailable.add(candidate.major);
+        GradleToolchainPlanner.Plan plan = planWithLaunchers(project, need, gradleAvailable, jdkAvailable, wrapperUsable, logger);
+        if (!plan.isUsable()) return fail(plan.error);
+        for (String note : plan.notes) logger.onInfo(note);
+        for (String warning : plan.warnings) logger.onWarning(warning);
+        if (need.getAgpVersion() != null && !need.isAgpKnown()) logger.onInfo("Android Gradle plugin " + need.getAgpVersion() + " is not in the compatibility data (gradle-compat.json); only the rules that exist were applied.");
+
+        // Gradle distribution
         File gradleExecutable = null; GradleVersion gradleVersion = null; boolean wrapper = false; File bootstrapJar = null; String mainClass = null;
-        File javaLauncher = BuildExecutableResolver.resolve(null, "javaexe");
-        GradleRuntimeLocator.GradleInstall install = chooseGradle(need.getRequiredGradleVersion());
-        if (install == null && !offline && need.getRequiredGradleVersion() != null) {
-            String id = "gradle-" + need.getRequiredGradleVersion();
-            File home = provisioner.install(id, new File(filesDirectory, "gradle-runtime/gradle-" + need.getRequiredGradleVersion()), "bin/gradle", logger);
-            if (home != null) install = chooseGradle(need.getRequiredGradleVersion());
+        GradleRuntimeLocator.GradleInstall install = installedGradle(plan.gradle);
+        if (install == null && !plan.viaWrapper) {
+            String id = catalogGradle.get(plan.gradle);
+            if (id != null) { File home = provisioner.install(id, new File(filesDirectory, "gradle-runtime/" + id), "bin/gradle", logger); if (home != null) install = installedGradle(plan.gradle); }
         }
         if (install != null) {
             gradleExecutable = install.executable; gradleVersion = install.version;
             bootstrapJar = GradleRuntimeLocator.findLauncherJar(install.home); mainClass = "org.gradle.launcher.GradleMain";
-        } else {
-            File script = new File(project, "gradlew"), jar = new File(project, "gradle/wrapper/gradle-wrapper.jar");
-            if (script.isFile() && jar.isFile() && (script.canExecute() || javaLauncher != null)) {
-                gradleExecutable = script; wrapper = true; bootstrapJar = jar; mainClass = "org.gradle.wrapper.GradleWrapperMain";
-                logger.onWarning("No local Gradle distribution; falling back to the project wrapper, which downloads Gradle into the Gradle user home.");
-            }
+        } else if (wrapperUsable) {
+            gradleExecutable = wrapperScript; wrapper = true; bootstrapJar = wrapperJar; mainClass = "org.gradle.wrapper.GradleWrapperMain";
+            logger.onInfo("Gradle " + plan.gradle + " is taken from the project's own wrapper, which downloads it into the Gradle user home.");
         }
-        if (javaLauncher == null) logger.onWarning("No packaged java launcher (libjavaexe.so) in the native library directory; Gradle will be started through its shell script, which Android 10+ refuses to run from app storage.");
-        if (gradleExecutable == null) return fail("No usable Gradle distribution"
-            + (need.getRequiredGradleVersion() == null ? "" : " (needs " + need.getRequiredGradleVersion() + ")")
-            + ". Install one at " + new File(filesDirectory, "gradle-runtime/gradle-" + (need.getRequiredGradleVersion() == null ? "<version>" : need.getRequiredGradleVersion()) + "/bin/gradle")
-            + (offline ? "; automatic download is disabled in offline mode." : " or publish a matching 'gradle-<version>' entry in the verified build catalog."));
+        if (gradleExecutable == null) return fail("Gradle " + plan.gradle + " could not be installed"
+            + (offline ? "; automatic download is disabled in offline mode." : " from the verified build catalog, and the project has no usable wrapper."));
 
-        // 2. JDK compatible with both AGP (minimum) and Gradle (maximum)
-        GradleVersion effective = gradleVersion != null ? gradleVersion : need.getRequiredGradleVersion();
-        int min = need.getMinimumJdk(), max = GradleCompatibilityMatrix.maximumJdk(effective);
-        GradleRuntimeLocator.JdkInstall jdk = chooseJdk(min, max);
+        // JDK: the planner already checked it against the AGP minimum, the project's Java level and the Gradle maximum
+        GradleRuntimeLocator.JdkInstall jdk = installedJdk(plan.jdk);
         if (jdk == null && !offline) {
-            // The catalog may carry a newer JDK than the AGP minimum (for example jdk-21 for an AGP that needs 17+).
-            int wanted = provisioner.findJdkMajor(min, max);
-            if (wanted > 0) {
-                File home = provisioner.install("jdk-" + wanted, new File(filesDirectory, "jdk/jdk-" + wanted), "lib/server/libjvm.so", logger);
-                if (home != null) jdk = chooseJdk(min, max);
-            } else logger.onWarning("The build catalog has no JDK between " + min + " and " + max + " for this device's ABI.");
+            File home = provisioner.install("jdk-" + plan.jdk, new File(filesDirectory, "jdk/jdk-" + plan.jdk), "lib/server/libjvm.so", logger);
+            if (home != null) jdk = installedJdk(plan.jdk);
         }
-        if (jdk == null) return fail("No JDK between " + min + " and " + max + " found. Install a JDK that runs on this device under "
-            + new File(filesDirectory, "jdk") + "/jdk-" + min + " (it must contain bin/java and a 'release' file). A desktop JDK is not guaranteed to run on Android.");
+        if (jdk == null) return fail("JDK " + plan.jdk + " is needed for this project but could not be installed"
+            + (offline ? " (offline mode)." : " from the verified build catalog.") + " It would live under " + new File(filesDirectory, "jdk") + "/jdk-" + plan.jdk + ".");
+
+        // Launchers always belong to the JDK that was chosen (lib<tool><major>exe.so), never to some other major.
+        File javaLauncher = launcherFor("java", jdk.major);
+        if (javaLauncher == null) logger.onWarning("No packaged java launcher (" + JdkLauncherSet.fileName("java", jdk.major) + ") in the native library directory; Gradle will be started through its shell script, which Android 10+ refuses to run from app storage.");
 
         // 3. Android SDK and AAPT2
         if (javaLauncher != null) {
             // bin/java inside the JDK tree points at the launcher so that Gradle can start the child JVM it forks.
             String linkProblem = JdkLauncherLink.ensure(jdk.home, javaLauncher);
             if (linkProblem != null) logger.onWarning(linkProblem);
+            // AGP (JdkImageTransform, compileSdk 34+) starts javac, jmod and jlink from <jdk>/bin; Gradle may start jar. Like bin/java, none of
+            // them can run from app storage (error 13), so each one is linked to a copy packaged in the native library directory.
+            for (String tool : new String[] {"javac", "jmod", "jar", "jlink"}) {
+                File toolLauncher = launcherFor(tool, jdk.major);   // same lookup (and same executable check) as the java launcher
+                if (toolLauncher != null) {
+                    String toolProblem = JdkLauncherLink.ensureTool(jdk.home, tool, toolLauncher);
+                    if (toolProblem != null) logger.onWarning(toolProblem);
+                } else logger.onWarning("No packaged " + tool + " launcher (" + JdkLauncherSet.fileName(tool, jdk.major) + ") for JDK " + jdk.major + " in the native library directory; projects with compileSdk 34 or higher can fail when the build starts " + tool + ".");
+            }
             String selfTest = NativeToolSelfTest.checkJava(javaLauncher, jdk.home);
             if (selfTest != null) return fail(selfTest);
             logger.onInfo("java launcher self-test passed (" + javaLauncher.getName() + ").");
         }
         File sdk = new File(filesDirectory, "android-sdk");
         // Studio Mobile keeps android.jar under build-tools/platforms; the Gradle build expects an SDK folder, so present it as one.
-        File androidSdk = AndroidSdkLayout.ensure(filesDirectory, logger);
+        File androidSdk = AndroidSdkLayout.ensure(filesDirectory, project, logger);
         if (androidSdk == null) {
             logger.onInfo("No platform jar found under " + sdk + "/platforms, so sdk.dir is not set for this build.");
             logger.onWarning("The Android SDK files are not installed on this device.");
@@ -126,25 +154,52 @@ public final class GradleRuntimeManager {
             return fail(message.toString());
         }
         if (offline && !cacheManager.hasCachedDependencies()) return fail("Offline build requested but the Gradle dependency cache is empty. Run one online build first.");
+        File toolchainScript = ToolchainInitScript.ensure(cacheManager.getGradleUserHome());
+        if (toolchainScript == null) logger.onWarning("Could not write the toolchain init script; a jvmToolchain lower than JDK " + jdk.major + " will not be mapped to it.");
+        else logger.onInfo("Toolchain mapping is on: a jvmToolchain / java.toolchain request lower than JDK " + jdk.major + " is built with JDK " + jdk.major + " at the requested Java level.");
         logger.onInfo("Using JDK " + jdk.major + " at " + jdk.home + (wrapper ? " with the project wrapper." : " with Gradle " + gradleVersion + "."));
         return new Resolution(new GradleRuntime(gradleExecutable, gradleVersion, jdk.home, jdk.major, cacheManager.getGradleUserHome(), androidSdk, aapt2, wrapper, javaLauncher, bootstrapJar, mainClass), null);
     }
 
-    /** Same major version, at least the required version, closest match first (avoids silent major upgrades). */
-    private GradleRuntimeLocator.GradleInstall chooseGradle(GradleVersion required) {
-        GradleRuntimeLocator.GradleInstall best = null;
-        for (GradleRuntimeLocator.GradleInstall candidate : locator.findGradleInstalls()) {
-            if (candidate.version == null) { if (required == null && best == null) best = candidate; continue; }
-            if (required != null && (candidate.version.getMajor() != required.getMajor() || candidate.version.compareTo(required) < 0)) continue;
-            if (best == null || best.version == null || candidate.version.compareTo(best.version) < 0) best = candidate;
-        }
-        return best;
+    /**
+     * Plans Gradle and JDK exactly like GradleToolchainPlanner always did (the project decides: AGP, Java level, Gradle window; the lowest JDK
+     * that satisfies them), but only from JDK majors whose launchers are packaged in the APK. A JDK without its lib&lt;tool&gt;&lt;major&gt;exe.so can
+     * be installed and still never start on Android 10+, so choosing it would only move the failure to later. Nothing is forced to one major:
+     * with launchers for 17, 21 and 25 a project that needs 17 gets 17, one that needs 25 gets 25.
+     *
+     * <p>Order: (1) a JDK with java + javac + jmod + jlink when compileSdk is 34+ or unreadable (AGP builds a JDK image with them),
+     * (2) a JDK with at least java, (3) the unrestricted plan, so devices or builds without any packaged launcher behave as before and the
+     * existing warnings explain what is missing.
+     */
+    private GradleToolchainPlanner.Plan planWithLaunchers(File project, GradleProjectRequirements need, Set<GradleVersion> gradleAvailable,
+                                                          Set<Integer> jdkAvailable, boolean wrapperUsable, BuildLogger logger) {
+        GradleToolchainPlanner.Plan open = GradleToolchainPlanner.plan(need, matrix, gradleAvailable, jdkAvailable, wrapperUsable);
+        JdkLauncherSet launchers = JdkLauncherSet.scan(BuildExecutableResolver.registeredNativeLibraryDirectory());
+        if (launchers.isEmpty()) return open;
+        logger.onInfo("Packaged JDK launchers: " + launchers.describe() + ".");
+        int compileSdk = AndroidSdkLayout.readCompileSdk(project);
+        boolean needsImageTools = compileSdk <= 0 || compileSdk >= JdkLauncherSet.IMAGE_MIN_COMPILE_SDK;   // a variable compileSdk is treated as modern
+        GradleToolchainPlanner.Plan plan = null;
+        if (needsImageTools) plan = GradleToolchainPlanner.plan(need, matrix, gradleAvailable, JdkLauncherSet.restrict(jdkAvailable, launchers.majorsForImageBuilds()), wrapperUsable);
+        if (plan == null || !plan.isUsable()) plan = GradleToolchainPlanner.plan(need, matrix, gradleAvailable, JdkLauncherSet.restrict(jdkAvailable, launchers.majorsWithJava()), wrapperUsable);
+        if (!plan.isUsable()) return open;   // no JDK with launchers fits the project; keep the old behavior and its warnings
+        if (open.isUsable() && (open.jdk != plan.jdk || !open.gradle.equals(plan.gradle)))
+            plan.notes.add("JDK " + open.jdk + " with Gradle " + open.gradle + " would fit the project, but the APK has no launchers for JDK " + open.jdk
+                + "; using JDK " + plan.jdk + " with Gradle " + plan.gradle + ", which has them.");
+        return plan;
     }
-    private GradleRuntimeLocator.JdkInstall chooseJdk(int min, int max) {
-        GradleRuntimeLocator.JdkInstall best = null;
-        for (GradleRuntimeLocator.JdkInstall candidate : locator.findJdkInstalls(externalJavaHome))
-            if (candidate.major >= min && candidate.major <= max && (best == null || candidate.major < best.major)) best = candidate;
-        return best;
+
+    /** Native launcher packaged for exactly this JDK major (java 17 -> libjava17exe.so). Null when that major has none; no other major is substituted. */
+    private static File launcherFor(String tool, int major) { return BuildExecutableResolver.resolve(null, tool + major + "exe"); }
+
+    /** The installed Gradle with exactly this version (the planner decided which version; no "closest" guessing here). */
+    private GradleRuntimeLocator.GradleInstall installedGradle(GradleVersion exact) {
+        for (GradleRuntimeLocator.GradleInstall candidate : locator.findGradleInstalls()) if (candidate.version != null && candidate.version.compareTo(exact) == 0) return candidate;
+        return null;
+    }
+    private GradleRuntimeLocator.JdkInstall installedJdk(int major) {
+        for (GradleRuntimeLocator.JdkInstall candidate : locator.findJdkInstalls(externalJavaHome)) if (candidate.major == major) return candidate;
+        return null;
     }
 
     /** Creates local.properties only when absent so a user's own sdk.dir is never overwritten. */

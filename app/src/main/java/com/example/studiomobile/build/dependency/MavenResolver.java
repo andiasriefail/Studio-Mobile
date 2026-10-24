@@ -16,7 +16,9 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -99,6 +101,14 @@ public final class MavenResolver {
     private final Map<String, String> platformManaged = new LinkedHashMap<>();
     /** Modules whose version is fixed by enforcedPlatform(...). */
     private final Set<String> enforcedModules = new HashSet<>();
+    /** group:artifact -> {classifier, extension} of the declaration that asked for it (empty strings when not given). */
+    private final Map<String, String[]> variants = new LinkedHashMap<>();
+    /** Modules declared with @ext: only that file is fetched; the module's POM and its dependencies are not read (the same as Gradle). */
+    private final Set<String> artifactOnly = new HashSet<>();
+    /** group:artifact -> every version the repositories list for it, kept for this resolution. */
+    private final Map<String, List<String>> versionLists = new HashMap<>();
+    /** Like Gradle, a saved list of versions is trusted for 24 hours before the repository is asked again. */
+    private static final long VERSION_LIST_TTL_MS = 24L * 60 * 60 * 1000;
 
     public MavenResolver(File cacheDirectory, Fetcher fetcher, List<String> repositories) {
         this(cacheDirectory, fetcher, repositories, DownloadMemoryPolicy.detect());
@@ -149,7 +159,10 @@ public final class MavenResolver {
         Map<String, String> best = new LinkedHashMap<>();
         for (GradleDependencyParser.Declaration d : roots) {
             String ga = d.group + ":" + d.artifact;
-            String version = constrain(ga, d.version == null || d.version.isEmpty() ? null : cleanVersion(d.version));
+            String declared = d.version == null || d.version.trim().isEmpty() ? null : d.version.trim();
+            if (declared != null && isDynamicVersion(declared)) declared = resolveDynamic(d.group, d.artifact, declared);   // 1.+, [1.0,2.0), latest.release -> one real version
+            rememberVariant(ga, d);
+            String version = constrain(ga, declared == null ? null : cleanVersion(declared));
             if (version == null) { result.warnings.add(ga + " has no version and no platform manages it; skipped."); continue; }
             best.merge(ga, version, (a, b) -> compare(a, b) >= 0 ? a : b);
         }
@@ -167,6 +180,16 @@ public final class MavenResolver {
             if (materialize(node)) result.notes.add(ga + ":" + node.version + (pins.get(ga + ":" + node.version) != null ? " [SHA-256 pinned]" : ""));
         }
         return result;
+    }
+
+    /** Remembers the classifier / @extension a declaration asked for. The first declaration of a module decides. */
+    private void rememberVariant(String ga, GradleDependencyParser.Declaration d) {
+        String classifier = d.classifier == null ? "" : d.classifier, extension = d.extension == null ? "" : d.extension;
+        if (classifier.isEmpty() && extension.isEmpty()) return;
+        String[] known = variants.get(ga);
+        if (known == null) { variants.put(ga, new String[] {classifier, extension}); if (!extension.isEmpty()) artifactOnly.add(ga); }
+        else if (!known[0].equals(classifier) || !known[1].equals(extension))
+            result.warnings.add(ga + " is declared more than once with a different classifier or @extension; only the first one is used.");
     }
 
     /** Reads each BOM's dependencyManagement (parents and imported BOMs included) into {@link #platformManaged}. */
@@ -216,6 +239,11 @@ public final class MavenResolver {
     private DepNode node(String ga, String version) throws IOException {
         String key = ga + ":" + version; DepNode existing = nodes.get(key); if (existing != null) return existing;
         String[] p = ga.split(":"); DepNode node = new DepNode(); node.ga = ga; node.version = version; nodes.put(key, node);
+        if (artifactOnly.contains(ga)) {   // g:a:v@ext: just that file, no POM and no transitive dependencies (as Gradle does for artifact-only notation)
+            node.hasArtifact = true; node.packaging = variants.get(ga)[1];
+            result.notes.add(ga + ":" + version + "@" + node.packaging + " is an artifact-only dependency: its own dependencies are not added");
+            return node;
+        }
         String redirect = moduleRedirect(p[0], p[1], version);
         if (redirect != null) { node.deps.add(redirect.split(":")); node.hasArtifact = false; result.notes.add(ga + ":" + version + " -> " + redirect); return node; }
         Pom pom = readPom(p[0], p[1], version, 0);
@@ -310,24 +338,28 @@ public final class MavenResolver {
     /** Downloads (or reads from the cache) the artifact and registers its jar(s) / extracted AAR folder in the result. */
     private boolean materialize(DepNode node) throws IOException {
         String[] p = node.ga.split(":");
-        String ext = "aar".equals(node.packaging) ? "aar" : "jar";
-        String name = p[1] + "-" + node.version + "." + ext;
+        String[] variant = variants.get(node.ga);
+        String classifier = variant == null ? "" : variant[0], wantedExtension = variant == null ? "" : variant[1];
+        String suffix = classifier.isEmpty() ? "" : "-" + classifier;
+        String ext = !wantedExtension.isEmpty() ? wantedExtension : "aar".equals(node.packaging) ? "aar" : "jar";
+        String name = p[1] + "-" + node.version + suffix + "." + ext;
         if (!fetchArtifact(path(p[0], p[1], node.version, name), true, MAX_ARTIFACT)) {
-            if ("jar".equals(ext)) { // Some POMs declare no packaging but ship an AAR.
-                String aarName = p[1] + "-" + node.version + ".aar";
-                if (fetchArtifact(path(p[0], p[1], node.version, aarName), true, MAX_ARTIFACT)) { node.packaging = "aar"; fromAar(p, node, aarName); return true; }
+            if ("jar".equals(ext) && wantedExtension.isEmpty()) { // Some POMs declare no packaging but ship an AAR.
+                String aarName = p[1] + "-" + node.version + suffix + ".aar";
+                if (fetchArtifact(path(p[0], p[1], node.version, aarName), true, MAX_ARTIFACT)) { node.packaging = "aar"; fromAar(p, node, aarName, suffix); return true; }
             }
-            result.warnings.add(node.ga + ":" + node.version + " has no " + ext + " file; skipped (metadata-only artifact).");
+            result.warnings.add(node.ga + ":" + node.version + (classifier.isEmpty() ? "" : " (classifier " + classifier + ")") + " has no " + ext + " file; skipped"
+                + (classifier.isEmpty() && wantedExtension.isEmpty() ? " (metadata-only artifact)." : "."));
             return false;
         }
-        if ("aar".equals(ext)) fromAar(p, node, name); else result.jars.add(cachedFile(p[0], p[1], node.version, name));
+        if ("aar".equals(ext)) fromAar(p, node, name, suffix); else result.jars.add(cachedFile(p[0], p[1], node.version, name));
         return true;
     }
 
     /** Extracts the AAR once (atomically, via a temporary folder) and registers classes.jar, libs/*.jar and the folder itself. */
-    private void fromAar(String[] p, DepNode node, String aarName) throws IOException {
+    private void fromAar(String[] p, DepNode node, String aarName, String suffix) throws IOException {
         File aar = cachedFile(p[0], p[1], node.version, aarName);
-        File directory = new File(aar.getParentFile(), p[1] + "-" + node.version + "-aar");
+        File directory = new File(aar.getParentFile(), p[1] + "-" + node.version + suffix + "-aar");
         File marker = new File(directory, ".extracted");
         if (!marker.isFile()) {
             File temporary = new File(aar.getParentFile(), directory.getName() + ".tmp");
@@ -452,6 +484,200 @@ public final class MavenResolver {
         return false;
     }
 
+    // ---------- dynamic versions: 1.+, [1.0,2.0), latest.release ----------
+    //
+    // Same rules as Gradle: the versions a repository has are read from its maven-metadata.xml, every allowed repository is asked and the
+    // highest matching version wins, a saved list is trusted for 24 hours, and the version that was chosen is written to the build log.
+
+    /** True for a version that is not one fixed version: a range, a prefix such as 1.+ (or just +), or latest.release. */
+    public static boolean isDynamicVersion(String version) {
+        if (version == null) return false;
+        String v = version.trim();
+        return v.startsWith("[") || v.startsWith("(") || v.startsWith("]") || v.contains(",") || v.endsWith("+") || v.startsWith("latest.");
+    }
+
+    /** Whether the dynamic version can be resolved here. latest.integration (SNAPSHOTs) and other statuses cannot. */
+    public static boolean isSupportedDynamicVersion(String version) {
+        String v = version.trim();
+        if (v.startsWith("latest.")) return v.equals("latest.release");
+        if (v.startsWith("[") || v.startsWith("(") || v.startsWith("]")) { try { new VersionRange(v); return true; } catch (IllegalArgumentException invalid) { return false; } }
+        return !v.contains(",");
+    }
+
+    /** Whether the concrete version is accepted by the dynamic version. */
+    public static boolean versionMatches(String spec, String version) {
+        String v = spec.trim();
+        if (v.equals("+")) return true;
+        if (v.endsWith("+")) return version.startsWith(v.substring(0, v.length() - 1));
+        if (v.equals("latest.release")) return !version.toUpperCase(Locale.ROOT).endsWith("SNAPSHOT");
+        if (v.startsWith("latest.")) throw new IllegalArgumentException("only latest.release is supported");
+        return new VersionRange(v).contains(version);
+    }
+
+    /** A Maven-style range: [1.0,2.0)  (1.0,2.0]  [1.5]  [1.0,)  (,2.0). */
+    private static final class VersionRange {
+        final String low, high; final boolean lowInclusive, highInclusive, exact;
+        VersionRange(String spec) {
+            String s = spec.trim();
+            // ( and ] both start an exclusive lower bound, ) and [ both end an exclusive upper bound: (1.2, 1.5] == ]1.2, 1.5]  and  [1.1, 2.0) == [1.1, 2.0[
+            if (s.length() < 3 || !(s.startsWith("[") || s.startsWith("(") || s.startsWith("]")) || !(s.endsWith("]") || s.endsWith(")") || s.endsWith("[")))
+                throw new IllegalArgumentException("not a version range: " + spec);
+            lowInclusive = s.startsWith("["); highInclusive = s.endsWith("]");
+            String inner = s.substring(1, s.length() - 1);
+            if (inner.contains("[") || inner.contains("]") || inner.contains("(") || inner.contains(")")) throw new IllegalArgumentException("only one range is supported: " + spec);
+            String[] parts = inner.split(",", -1);
+            if (parts.length == 1) {
+                if (!lowInclusive || !highInclusive || parts[0].trim().isEmpty()) throw new IllegalArgumentException("not a version range: " + spec);
+                exact = true; low = high = parts[0].trim();
+            } else if (parts.length == 2) {
+                exact = false; low = parts[0].trim(); high = parts[1].trim();
+                if (low.isEmpty() && high.isEmpty()) throw new IllegalArgumentException("empty range: " + spec);
+            } else throw new IllegalArgumentException("only one range is supported: " + spec);
+        }
+        boolean contains(String version) {
+            if (exact) return compare(version, low) == 0;
+            if (!low.isEmpty()) { int c = compare(version, low); if (c < 0 || (c == 0 && !lowInclusive)) return false; }
+            if (!high.isEmpty()) {
+                int c = compare(version, high);
+                if (c > 0 || (c == 0 && !highInclusive)) return false;
+                // An exclusive upper bound acts as a prefix exclude: [1.0,2.0) also leaves out 2.0-rc1, 2.0-dev1 ... (Gradle docs)
+                if (!highInclusive && c < 0 && version.startsWith(high)) return false;
+            }
+            return true;
+        }
+    }
+
+    private static boolean looksPreRelease(String version) {
+        return version.toLowerCase(Locale.ROOT).matches(".*[-._](alpha|beta|rc|cr|m\\d+|dev|preview|eap|snapshot)[-._\\d]*.*|.*[-._](alpha|beta|rc|cr|dev|preview|eap|snapshot)$");
+    }
+
+    /** Picks the highest listed version that the dynamic version accepts. */
+    private String resolveDynamic(String g, String a, String spec) throws IOException {
+        String ga = g + ":" + a;
+        if (!isSupportedDynamicVersion(spec))
+            throw new IOException(ga + ":" + spec + " cannot be resolved here (supported: ranges like [1.0,2.0), prefixes like 1.+ and latest.release). Use a fixed version.");
+        List<String> available = availableVersions(g, a);
+        if (available.isEmpty())
+            throw new IOException("No list of versions was found for " + ga + " in the repositories, so '" + spec + "' cannot be resolved. Use a fixed version.");
+        String best = null; int matching = 0;
+        for (String version : available) {
+            if (!versionMatches(spec, version)) continue;
+            matching++;
+            if (best == null || compare(version, best) > 0) best = version;
+        }
+        if (best == null) throw new IOException("No version of " + ga + " matches '" + spec + "'. Available: " + available);
+        result.notes.add(ga + ":" + spec + " -> " + best + " (highest of " + matching + " matching version" + (matching == 1 ? "" : "s") + "; the list is saved for 24 hours)");
+        if (looksPreRelease(best))
+            result.warnings.add(ga + ":" + spec + " resolved to " + best + ", which is a pre-release. Gradle chooses it too, because a dynamic version accepts pre-releases. Use a fixed version for repeatable builds.");
+        return best;
+    }
+
+    /** Every version of g:a that the repositories allowed for this group list, in the order found (all repositories are asked, as Gradle does for dynamic versions). */
+    private List<String> availableVersions(String g, String a) throws IOException {
+        String key = g + ":" + a;
+        List<String> known = versionLists.get(key);
+        if (known != null) return known;
+        Set<String> all = new LinkedHashSet<>();
+        for (MavenRepository repo : repos) {
+            if (!repo.allows(g)) continue;
+            List<String> listed = readVersionList(repo, g, a);
+            if (listed != null) all.addAll(listed);
+        }
+        List<String> versions = new ArrayList<>(all);
+        versionLists.put(key, versions);
+        return versions;
+    }
+
+    /** The versions one repository lists for g:a, or null when it has no list. Saved for 24 hours; a stale saved list is used when the repository cannot be reached. */
+    private List<String> readVersionList(MavenRepository repo, String g, String a) throws IOException {
+        String relative = g.replace('.', '/') + "/" + a + "/maven-metadata.xml";
+        File saved = new File(new File(cache, ".version-lists/" + sha1Hex(repo.url)), relative);
+        boolean fresh = saved.isFile() && saved.length() > 0 && System.currentTimeMillis() - saved.lastModified() < VERSION_LIST_TTL_MS;
+        if (fresh) { List<String> list = parseVersionList(Files.readAllBytes(saved.toPath()), a); if (list != null) return list; }
+        byte[] data; List<String> list = null;
+        try {
+            data = fetcher.get(repo.url + relative, policy.wholeFileLimit(MAX_SMALL));
+            if (data != null) {
+                byte[] sidecar = null;
+                try { sidecar = fetcher.get(repo.url + relative + ".sha1", 1024); } catch (AccessDenied noSidecar) { /* the list is only used to choose a version; the file itself is verified later */ }
+                if (sidecar != null) {
+                    String expected = new String(sidecar, StandardCharsets.UTF_8).trim().split("\\s+")[0].toLowerCase(Locale.ROOT), actual = sha1(data);
+                    if (!actual.equals(expected)) throw ChecksumFailure.serverMismatch(g + ":" + a, "maven-metadata.xml", repo.url, expected, actual, sha256(data));
+                }
+                list = parseVersionList(data, a);
+            } else {   // Google's repository documents a per-group index instead
+                byte[] index = fetcher.get(repo.url + g.replace('.', '/') + "/group-index.xml", policy.wholeFileLimit(MAX_SMALL));
+                if (index != null) list = parseGroupIndex(index, a);
+            }
+        } catch (AccessDenied refused) {
+            noteDenied(repo); return null;
+        } catch (ChecksumFailure integrity) {
+            throw integrity;
+        } catch (IOException unreachable) {
+            if (saved.isFile() && saved.length() > 0) {   // offline or the repository is down: an old list is better than none
+                List<String> old = parseVersionList(Files.readAllBytes(saved.toPath()), a);
+                if (old != null) { result.warnings.add("Could not refresh the version list of " + g + ":" + a + " from " + repo.url + " (" + unreachable.getMessage() + "); the saved list is used."); return old; }
+            }
+            throw unreachable;
+        }
+        if (list == null) return null;
+        File parent = saved.getParentFile();
+        if (parent.isDirectory() || parent.mkdirs()) {
+            File temporary = File.createTempFile(saved.getName(), ".partial", parent);
+            try {
+                Files.write(temporary.toPath(), list.isEmpty() ? new byte[0] : toMetadataXml(g, a, list).getBytes(StandardCharsets.UTF_8));
+                moveIntoPlace(temporary, saved);
+                //noinspection ResultOfMethodCallIgnored
+                saved.setLastModified(System.currentTimeMillis());
+            } finally { if (temporary.exists() && !temporary.delete()) temporary.deleteOnExit(); }
+        }
+        return list;
+    }
+
+    /** The list is saved in maven-metadata.xml form whichever file it came from, so one reader serves the cache. */
+    private static String toMetadataXml(String g, String a, List<String> versions) {
+        StringBuilder xml = new StringBuilder("<metadata><groupId>").append(g).append("</groupId><artifactId>").append(a).append("</artifactId><versioning><versions>");
+        for (String version : versions) xml.append("<version>").append(version.replace("&", "&amp;").replace("<", "&lt;")).append("</version>");
+        return xml.append("</versions></versioning></metadata>").toString();
+    }
+
+    /** maven-metadata.xml: metadata / versioning / versions / version*. Null when the file cannot be read. */
+    private static List<String> parseVersionList(byte[] data, String artifact) {
+        try {
+            Element root = parseXml(data);
+            Element versioning = child(root, "versioning");
+            Element versions = versioning == null ? null : child(versioning, "versions");
+            if (versions == null) return null;
+            List<String> list = new ArrayList<>();
+            for (Element version : children(versions, "version")) { String t = version.getTextContent().trim(); if (!t.isEmpty()) list.add(t); }
+            return list;
+        } catch (Exception unreadable) { return null; }
+    }
+
+    /** Google's group-index.xml: the root is named after the group, a child after the artifact, with a comma separated versions attribute. */
+    private static List<String> parseGroupIndex(byte[] data, String artifact) {
+        try {
+            Element root = parseXml(data);
+            Element entry = child(root, artifact);
+            if (entry == null || !entry.hasAttribute("versions")) return null;
+            List<String> list = new ArrayList<>();
+            for (String version : entry.getAttribute("versions").split(",")) if (!version.trim().isEmpty()) list.add(version.trim());
+            return list;
+        } catch (Exception unreadable) { return null; }
+    }
+
+    private static Element parseXml(byte[] data) throws Exception {
+        DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
+        try { factory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true); }   // no XXE
+        catch (javax.xml.parsers.ParserConfigurationException unsupported) { /* Android's parser does not resolve external entities anyway */ }
+        return factory.newDocumentBuilder().parse(new ByteArrayInputStream(data)).getDocumentElement();
+    }
+
+    private static String sha1Hex(String text) {
+        try { return hex(MessageDigest.getInstance("SHA-1").digest(text.getBytes(StandardCharsets.UTF_8))); }
+        catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException("SHA-1 unavailable", e); }
+    }
+
     // ---------- repository helpers ----------
     private final Set<String> deniedReported = new HashSet<>();
     private void noteDenied(MavenRepository repo) {
@@ -469,7 +695,12 @@ public final class MavenResolver {
         String[] parts = relative.split("/");
         int n = parts.length;
         if (n < 4) return null;
-        return groupOf(relative) + ":" + parts[n - 3] + ":" + parts[n - 2];
+        String coordinate = groupOf(relative) + ":" + parts[n - 3] + ":" + parts[n - 2];
+        // A classifier file (artifact-1.0-sources.jar) is its own coordinate, so a SHA-256 pinned for the main file is never compared with it.
+        String prefix = parts[n - 3] + "-" + parts[n - 2] + "-", file = parts[n - 1];
+        int dot = file.lastIndexOf('.');
+        if (file.startsWith(prefix) && dot > prefix.length()) coordinate += ":" + file.substring(prefix.length(), dot);
+        return coordinate;
     }
     private static String fileNameOf(String relative) { return relative.substring(relative.lastIndexOf('/') + 1); }
 
@@ -529,25 +760,49 @@ public final class MavenResolver {
         catch (java.security.NoSuchAlgorithmException e) { throw new IOException("SHA-1 unavailable", e); }
     }
 
-    /** Maven-style ordering: numeric segments compare as numbers; pre-release qualifiers sort below the release. */
+    /**
+     * Gradle's version ordering (docs.gradle.org, "Declaring Versions and Ranges"): a version is split at . - _ + and between digits and
+     * letters (1a1 is 1.a.1). Numbers compare as numbers and are higher than text (1.a < 1.1); text compares alphabetically and
+     * case-sensitively, except that dev is lower than any other text, and rc < snapshot < final < ga < release < sp are higher than any other
+     * text. A version with an extra number is higher (1.1 < 1.1.0), one with extra text is lower (1.1.a < 1.1).
+     */
     static int compare(String x, String y) {
-        String[] a = x.split("[.\\-_]"), b = y.split("[.\\-_]");
-        for (int i = 0; i < Math.max(a.length, b.length); i++) {
-            String s = i < a.length ? a[i] : "0", t = i < b.length ? b[i] : "0";
-            boolean ns = s.matches("\\d+"), nt = t.matches("\\d+");
-            int c;
-            if (ns && nt) c = new java.math.BigInteger(s).compareTo(new java.math.BigInteger(t));
-            else c = Integer.compare(rank(s, ns), rank(t, nt));
-            if (c != 0) return c;
-        }
-        return 0;
+        List<String> a = versionParts(x), b = versionParts(y);
+        int common = Math.min(a.size(), b.size());
+        for (int i = 0; i < common; i++) { int c = comparePart(a.get(i), b.get(i)); if (c != 0) return c; }
+        if (a.size() == b.size()) return 0;
+        boolean firstIsLonger = a.size() > b.size();
+        String extra = (firstIsLonger ? a : b).get(common);
+        int longerIs = isNumber(extra) ? 1 : -1;
+        return firstIsLonger ? longerIs : -longerIs;
     }
-    private static int rank(String s, boolean numeric) {
-        if (numeric) return 50;
-        String l = s.toLowerCase(Locale.ROOT);
-        if (l.startsWith("alpha")) return 10; if (l.startsWith("beta")) return 20; if (l.startsWith("m") && l.length() <= 3) return 25;
-        if (l.startsWith("rc") || l.startsWith("cr")) return 30; if (l.startsWith("snapshot")) return 5;
-        return 50;
+
+    private static final List<String> HIGH_TEXT = Arrays.asList("rc", "snapshot", "final", "ga", "release", "sp");
+
+    private static List<String> versionParts(String version) {
+        List<String> parts = new ArrayList<>();
+        for (String piece : version.trim().split("[._+\\-]")) {
+            if (piece.isEmpty()) continue;
+            for (String part : piece.split("(?<=\\d)(?=\\D)|(?<=\\D)(?=\\d)")) if (!part.isEmpty()) parts.add(part);
+        }
+        return parts;
+    }
+    private static boolean isNumber(String part) { for (int i = 0; i < part.length(); i++) if (!Character.isDigit(part.charAt(i))) return false; return !part.isEmpty(); }
+    private static int comparePart(String a, String b) {
+        boolean na = isNumber(a), nb = isNumber(b);
+        if (na && nb) return new java.math.BigInteger(a).compareTo(new java.math.BigInteger(b));
+        if (na) return 1;
+        if (nb) return -1;
+        int ra = textRank(a), rb = textRank(b);
+        if (ra != rb) return Integer.compare(ra, rb);
+        return ra == -1 ? a.compareTo(b) : 0;   // other text: alphabetical, case-sensitive
+    }
+    /** dev is below all other text (-2), ordinary text is -1, and the special words are above it in the order of {@link #HIGH_TEXT}. */
+    private static int textRank(String part) {
+        String lower = part.toLowerCase(Locale.ROOT);
+        if (lower.equals("dev")) return -2;
+        int index = HIGH_TEXT.indexOf(lower);
+        return index < 0 ? -1 : index;
     }
 
     /**

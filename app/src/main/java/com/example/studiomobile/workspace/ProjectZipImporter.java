@@ -8,9 +8,9 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipException;
-import java.util.zip.ZipInputStream;
+import net.lingala.zip4j.exception.ZipException;
+import net.lingala.zip4j.io.inputstream.ZipInputStream;
+import net.lingala.zip4j.model.LocalFileHeader;
 
 /**
  * Extracts a project ZIP into an abstract destination without any Android dependency.
@@ -19,6 +19,9 @@ import java.util.zip.ZipInputStream;
  * total-size limits against zip bombs, and removal of archive noise such as {@code __MACOSX/} and {@code .DS_Store}.
  * When every entry lives under one top-level folder (for example {@code MyProject/app/...}), that folder is
  * flattened so the destination directly contains {@code settings.gradle} and {@code app/}.</p>
+ *
+ * <p>Password-protected ZIPs (ZipCrypto and AES) are detected before anything is written. Without a password the import fails with
+ * {@link PasswordRequiredException}; with a wrong one, with {@link WrongPasswordException}. Both let the caller ask for a password and retry.</p>
  */
 public final class ProjectZipImporter {
     public static final int MAX_ENTRIES = 20000;
@@ -47,25 +50,60 @@ public final class ProjectZipImporter {
         }
     }
 
+    /** The ZIP has encrypted entries and no password was given. */
+    public static final class PasswordRequiredException extends IOException {
+        public PasswordRequiredException() { super("This ZIP is password protected."); }
+    }
+
+    /** The ZIP has encrypted entries and the password given does not open them. */
+    public static final class WrongPasswordException extends IOException {
+        public WrongPasswordException() { super("Wrong password."); }
+    }
+
     private ProjectZipImporter() { }
 
     public static Result importZip(SourceOpener source, Sink sink, ProgressListener progress) throws IOException {
+        return importZip(source, sink, progress, null);
+    }
+
+    /** @param password the ZIP password, or null/empty when the user has none. The array is not modified; the caller should clear it afterwards. */
+    public static Result importZip(SourceOpener source, Sink sink, ProgressListener progress, char[] password) throws IOException {
+        char[] secret = password == null || password.length == 0 ? null : password;
         try {
-            return extract(source, sink, progress);
+            return extract(source, sink, progress, secret);
         } catch (UnsafeEntryException unsafe) {
             throw new IOException(unsafe.getMessage(), unsafe);
         }
     }
 
-    private static Result extract(SourceOpener source, Sink sink, ProgressListener progress) throws IOException {
+    /** Maps a zip4j failure to a password exception when that is what it means; otherwise null. */
+    private static IOException passwordProblem(ZipException exception, boolean havePassword, boolean sawEncrypted) {
+        ZipException.Type type = exception.getType();
+        if (type == ZipException.Type.WRONG_PASSWORD) return havePassword ? new WrongPasswordException() : new PasswordRequiredException();
+        // ZipCrypto only has a 1-byte password check, so a wrong password can pass it and show up as a CRC error instead.
+        if (type == ZipException.Type.CHECKSUM_MISMATCH && sawEncrypted) return havePassword ? new WrongPasswordException() : new PasswordRequiredException();
+        return null;
+    }
+
+    private static Result extract(SourceOpener source, Sink sink, ProgressListener progress, char[] password) throws IOException {
         List<String> names = new ArrayList<>();
-        try (ZipInputStream scan = new ZipInputStream(source.open(), StandardCharsets.UTF_8)) {
-            ZipEntry entry;
+        boolean encrypted = false;
+        // Scan: list the entries and, for encrypted ones, read them completely so a wrong password is found before any file is written.
+        try (ZipInputStream scan = new ZipInputStream(source.open(), password, StandardCharsets.UTF_8)) {
+            LocalFileHeader entry;
+            byte[] drain = new byte[32768];
             while ((entry = scan.getNextEntry()) != null) {
                 if (names.size() >= MAX_ENTRIES) throw new IOException("The ZIP has too many entries (limit " + MAX_ENTRIES + ").");
-                names.add(entry.getName());
+                names.add(entry.getFileName());
+                if (entry.isEncrypted() && !entry.isDirectory()) {
+                    encrypted = true;
+                    if (password == null) throw new PasswordRequiredException();
+                    while (scan.read(drain) != -1) { /* only verifies the password and the CRC */ }
+                }
             }
         } catch (ZipException exception) {
+            IOException problem = passwordProblem(exception, password != null, encrypted);
+            if (problem != null) throw problem;
             throw new IOException("Could not read the ZIP: " + exception.getMessage(), exception);
         }
         if (names.isEmpty()) throw new IOException("The ZIP is empty or is not a valid ZIP file.");
@@ -77,14 +115,14 @@ public final class ProjectZipImporter {
 
         int files = 0, directories = 0; long bytes = 0;
         Set<String> seen = new HashSet<>();
-        try (ZipInputStream zip = new ZipInputStream(source.open(), StandardCharsets.UTF_8)) {
-            ZipEntry entry;
+        try (ZipInputStream zip = new ZipInputStream(source.open(), password, StandardCharsets.UTF_8)) {
+            LocalFileHeader entry;
             byte[] buffer = new byte[32768];
             while ((entry = zip.getNextEntry()) != null) {
-                String rawName = entry.getName();
+                String rawName = entry.getFileName();
                 String path = relativePath(rawName, root);
                 if (path == null) continue;
-                if (rawName.endsWith("/")) { sink.ensureDirectory(path); directories++; continue; }
+                if (rawName.endsWith("/") || entry.isDirectory()) { sink.ensureDirectory(path); directories++; continue; }
                 if (!seen.add(path)) throw new IOException("The ZIP contains the same file twice: " + path);
                 try (OutputStream out = sink.openFile(path)) {
                     int count;
@@ -98,6 +136,8 @@ public final class ProjectZipImporter {
                 if (progress != null) progress.onProgress(files, totalFiles);
             }
         } catch (ZipException exception) {
+            IOException problem = passwordProblem(exception, password != null, encrypted);
+            if (problem != null) throw problem;
             throw new IOException("Could not extract the ZIP: " + exception.getMessage(), exception);
         }
         return new Result(files, directories, bytes, root);

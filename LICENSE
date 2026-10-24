@@ -1,28 +1,19 @@
-BSD 3-Clause License
+PolyForm Noncommercial License 1.0.0
 
-Copyright (c) 2026, andiasriefail
+<https://polyformproject.org/licenses/noncommercial/1.0.0>
 
-Redistribution and use in source and binary forms, with or without
-modification, are permitted provided that the following conditions are met:
+SPDX-License-Identifier: PolyForm-Noncommercial-1.0.0
 
-1. Redistributions of source code must retain the above copyright notice, this
-   list of conditions and the following disclaimer.
+Required Notice: Copyright (c) 2026 andiasriefail
 
-2. Redistributions in binary form must reproduce the above copyright notice,
-   this list of conditions and the following disclaimer in the documentation
-   and/or other materials provided with the distribution.
+This software is licensed under the PolyForm Noncommercial License 1.0.0.
+The complete terms are published at the address above, and anyone who
+receives a copy of any part of this software receives it under those terms.
 
-3. Neither the name of the copyright holder nor the names of its
-   contributors may be used to endorse or promote products derived from
-   this software without specific prior written permission.
+In short: any noncommercial purpose is permitted, including personal use,
+study, research, and use by noncommercial organizations, and including making
+and sharing changes such as bug fixes for those purposes. Commercial use is
+not permitted without separate written permission from the licensor.
 
-THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
-DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
-FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
-DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
-SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
-CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
-OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
-OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+Copies of this software that were obtained before 2026-10-24 under the
+BSD 3-Clause License remain governed by that license for those copies.

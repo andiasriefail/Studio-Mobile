@@ -14,7 +14,8 @@ import java.util.Map;
  * Understands: {@code module = "g:a"}, {@code group} + {@code name}, "g:a:v" and "g:a" strings, {@code version = "1.0"},
  * {@code version.ref}, rich versions ({@code strictly}, {@code require}, {@code prefer}) and {@code [bundles]}.
  * A library without a version is allowed: its version has to come from a platform/BOM.
- * Ranges ("[1.0,2.0)") and dynamic versions ("1.+") are reported, never guessed.
+ * Ranges ("[1.0,2.0)") and dynamic versions ("1.+", "latest.release") are passed on as written: the dependency resolver picks the real
+ * version from the repository's version list and writes the choice to the build log. Versions that come from a variable ("$x") are reported.
  */
 public final class VersionCatalog {
     /** One library entry. {@code version} is empty when the entry has none; {@code problem} is non-null when it cannot be used. */
@@ -118,13 +119,12 @@ public final class VersionCatalog {
             return resolveVersion(versions.get(ref), versions, depth + 1);
         }
         String strictly = text(map.get("strictly")), require = text(map.get("require")), prefer = text(map.get("prefer"));
-        // A fixed strictly/require wins. A range is only usable together with a fixed 'prefer', because the real
-        // version inside a range would have to be looked up online.
+        // A fixed strictly/require wins. A range goes on to the resolver, which takes the highest version inside it; a fixed 'prefer' next to a range is used as it is.
         for (String bound : new String[] {strictly, require}) {
             if (bound == null) continue;
             if (!isRange(bound)) return concrete(bound);
             if (prefer != null && !isRange(prefer)) return concrete(prefer);
-            return problem("uses the version range '" + bound + "', which is not supported (give a fixed version or add a fixed 'prefer')");
+            return concrete(bound);
         }
         if (prefer != null) return concrete(prefer);
         return problem("has a version table without ref, strictly, require or prefer");
@@ -133,12 +133,13 @@ public final class VersionCatalog {
     private static Resolved concrete(String version) {
         String v = version.trim();
         if (v.isEmpty()) return ok("");
-        if (isRange(v)) return problem("uses the version range '" + v + "', which is not supported");
-        if (v.contains("$") || v.endsWith("+") || v.startsWith("latest.")) return problem("uses the dynamic version '" + v + "', which is not supported");
+        if (v.contains("$")) return problem("uses the version '" + v + "', which is built from a variable and cannot be read");
+        if (MavenResolver.isDynamicVersion(v) && !MavenResolver.isSupportedDynamicVersion(v))
+            return problem("uses the version '" + v + "', which cannot be resolved here (supported: ranges like [1.0,2.0), prefixes like 1.+ and latest.release)");
         return ok(v);
     }
 
-    private static boolean isRange(String v) { String t = v.trim(); return t.startsWith("[") || t.startsWith("(") || t.contains(","); }
+    private static boolean isRange(String v) { String t = v.trim(); return t.startsWith("[") || t.startsWith("(") || t.startsWith("]") || t.contains(","); }
     private static String text(Object value) { return value instanceof String && !((String) value).trim().isEmpty() ? ((String) value).trim() : null; }
 
     @SuppressWarnings("unchecked")

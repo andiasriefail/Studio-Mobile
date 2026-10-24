@@ -155,4 +155,141 @@ public class MavenResolverPlatformTest {
         assertEquals(java.util.Arrays.asList("a-1.0.jar", "b-1.0.jar"), jarNames(result));
         assertFalse(result.notes.toString().contains("platform"));
     }
+
+    // ---- dynamic versions (maven-metadata.xml), classifiers and artifact-only dependencies
+
+    private void publishVersionList(String group, String artifact, String... versions) {
+        StringBuilder xml = new StringBuilder("<metadata><groupId>" + group + "</groupId><artifactId>" + artifact + "</artifactId><versioning><versions>");
+        for (String version : versions) xml.append("<version>").append(version).append("</version>");
+        xml.append("</versions></versioning></metadata>");
+        files.put(group.replace('.', '/') + "/" + artifact + "/maven-metadata.xml", xml.toString().getBytes(StandardCharsets.UTF_8));
+    }
+    private static byte[] zip(String... namesAndContents) throws IOException {
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+        try (java.util.zip.ZipOutputStream out = new java.util.zip.ZipOutputStream(bytes)) {
+            for (int i = 0; i < namesAndContents.length; i += 2) {
+                out.putNextEntry(new java.util.zip.ZipEntry(namesAndContents[i]));
+                out.write(namesAndContents[i + 1].getBytes(StandardCharsets.UTF_8));
+                out.closeEntry();
+            }
+        }
+        return bytes.toByteArray();
+    }
+
+    @Test public void prefixVersionTakesTheHighestMatchingVersion() throws IOException {
+        publishVersionList("lib", "a", "1.0", "1.5", "1.9", "2.0");
+        publish("lib", "a", "1.9", "");
+        MavenResolver.Result result = resolve("implementation(\"lib:a:1.+\")");
+        assertEquals(java.util.Arrays.asList("a-1.9.jar"), jarNames(result));
+        assertTrue(result.notes.toString().contains("lib:a:1.+ -> 1.9"));
+    }
+
+    @Test public void rangeTakesTheHighestVersionInsideAndExcludesTheUpperBound() throws IOException {
+        publishVersionList("lib", "a", "0.9", "1.0", "1.5", "2.0-rc1", "2.0", "3.0");
+        publish("lib", "a", "1.5", "");
+        assertEquals(java.util.Arrays.asList("a-1.5.jar"), jarNames(resolve("implementation(\"lib:a:[1.0,2.0)\")")));
+    }
+
+    @Test public void inclusiveAndOpenRanges() throws IOException {
+        publishVersionList("lib", "a", "1.0", "2.0", "3.0");
+        publish("lib", "a", "2.0", "");
+        publish("lib", "a", "3.0", "");
+        assertEquals(java.util.Arrays.asList("a-2.0.jar"), jarNames(resolve("implementation(\"lib:a:[1.0,2.0]\")")));
+        tearDown(); setUp();
+        publishVersionList("lib", "a", "1.0", "2.0", "3.0");
+        assertEquals(java.util.Arrays.asList("a-3.0.jar"), jarNames(resolve("implementation(\"lib:a:[2.0,)\")")));
+    }
+
+    @Test public void latestReleaseSkipsSnapshotsAndSortsReleaseCandidatesByNumber() throws IOException {
+        publishVersionList("lib", "a", "1.0", "2.0-SNAPSHOT");
+        publish("lib", "a", "1.0", "");
+        assertEquals(java.util.Arrays.asList("a-1.0.jar"), jarNames(resolve("implementation(\"lib:a:latest.release\")")));
+        tearDown(); setUp();
+        publishVersionList("lib", "b", "1.0-rc1", "1.0-rc10", "1.0-rc2");
+        publish("lib", "b", "1.0-rc10", "");
+        MavenResolver.Result result = resolve("implementation(\"lib:b:latest.release\")");
+        assertEquals(java.util.Arrays.asList("b-1.0-rc10.jar"), jarNames(result));
+        assertTrue(result.warnings.toString().contains("pre-release"));
+    }
+
+    @Test public void versionOrderingFollowsTheGradleRules() throws IOException {
+        // 1.1 is higher than 1.a; 1.0 is higher than 1.0-rc1; 1.0.1 is higher than 1.0; rc is higher than alpha and beta; dev is lowest.
+        publishVersionList("lib", "a", "1.a", "1.1");
+        publish("lib", "a", "1.1", "");
+        assertEquals(java.util.Arrays.asList("a-1.1.jar"), jarNames(resolve("implementation(\"lib:a:latest.release\")")));
+        tearDown(); setUp();
+        publishVersionList("lib", "b", "1.0-rc1", "1.0", "1.0-beta2");
+        publish("lib", "b", "1.0", "");
+        assertEquals(java.util.Arrays.asList("b-1.0.jar"), jarNames(resolve("implementation(\"lib:b:latest.release\")")));
+        tearDown(); setUp();
+        publishVersionList("lib", "c", "1.0-dev", "1.0-alpha", "1.0-beta", "1.0-rc");
+        publish("lib", "c", "1.0-rc", "");
+        assertEquals(java.util.Arrays.asList("c-1.0-rc.jar"), jarNames(resolve("implementation(\"lib:c:latest.release\")")));
+        tearDown(); setUp();
+        publishVersionList("lib", "d", "1.1", "1.1.0", "1.1.a");
+        publish("lib", "d", "1.1.0", "");
+        assertEquals(java.util.Arrays.asList("d-1.1.0.jar"), jarNames(resolve("implementation(\"lib:d:latest.release\")")));
+    }
+
+    @Test public void rangeWrittenWithSpacesAndReversedBracketsIsResolved() throws IOException {
+        publishVersionList("lib", "a", "1.1", "1.2", "1.5", "1.6");
+        publish("lib", "a", "1.5", "");
+        assertEquals(java.util.Arrays.asList("a-1.5.jar"), jarNames(resolve("implementation(\"lib:a:]1.2, 1.5]\")")));
+        tearDown(); setUp();
+        publishVersionList("lib", "b", "1.1", "2.0-rc1", "2.0");
+        publish("lib", "b", "1.1", "");
+        assertEquals(java.util.Arrays.asList("b-1.1.jar"), jarNames(resolve("implementation(\"lib:b:[1.1, 2.0[\")")));
+    }
+
+    @Test public void dynamicVersionWithoutAVersionListFailsWithAClearMessage() throws IOException {
+        publish("lib", "a", "1.0", "");
+        try { resolve("implementation(\"lib:a:1.+\")"); fail("expected IOException"); }
+        catch (IOException expected) { assertTrue(expected.getMessage().contains("lib:a")); assertTrue(expected.getMessage().contains("fixed version")); }
+    }
+
+    @Test public void rangeWithNoMatchListsTheAvailableVersions() throws IOException {
+        publishVersionList("lib", "a", "1.0", "1.1");
+        try { resolve("implementation(\"lib:a:[2.0,3.0)\")"); fail("expected IOException"); }
+        catch (IOException expected) { assertTrue(expected.getMessage().contains("[1.0, 1.1]")); }
+    }
+
+    @Test public void versionListIsSavedSoTheNextResolutionDoesNotAskAgain() throws IOException {
+        publishVersionList("lib", "a", "1.0", "1.2");
+        publish("lib", "a", "1.2", "");
+        assertEquals(java.util.Arrays.asList("a-1.2.jar"), jarNames(resolve("implementation(\"lib:a:1.+\")")));
+        files.remove("lib/a/maven-metadata.xml");   // the repository no longer answers; the saved list (younger than 24 hours) is used
+        assertEquals(java.util.Arrays.asList("a-1.2.jar"), jarNames(resolve("implementation(\"lib:a:1.+\")")));
+    }
+
+    @Test public void groupIndexIsUsedWhenTheRepositoryHasNoMavenMetadata() throws IOException {
+        files.put("lib/group-index.xml", "<lib><a versions=\"1.0,1.1,1.2\"/></lib>".getBytes(StandardCharsets.UTF_8));
+        publish("lib", "a", "1.2", "");
+        assertEquals(java.util.Arrays.asList("a-1.2.jar"), jarNames(resolve("implementation(\"lib:a:1.+\")")));
+    }
+
+    @Test public void classifierSelectsTheClassifierFileOnly() throws IOException {
+        publish("lib", "a", "1.0", "");
+        files.put("lib/a/1.0/a-1.0-tests.jar", "jar tests".getBytes(StandardCharsets.UTF_8));
+        assertEquals(java.util.Arrays.asList("a-1.0-tests.jar"), jarNames(resolve("implementation(\"lib:a:1.0:tests\")")));
+    }
+
+    @Test public void artifactOnlyDoesNotReadThePomOrAddItsDependencies() throws IOException {
+        publish("lib", "a", "1.0", deps(dep("lib", "b", "1.0")));
+        publish("lib", "b", "1.0", "");
+        MavenResolver.Result result = resolve("implementation(\"lib:a:1.0@jar\")");
+        assertEquals(java.util.Arrays.asList("a-1.0.jar"), jarNames(result));
+        assertTrue(result.notes.toString().contains("artifact-only"));
+    }
+
+    @Test public void artifactOnlyWorksWithoutAnyPom() throws IOException {
+        files.put("lib/a/1.0/a-1.0.jar", "jar a".getBytes(StandardCharsets.UTF_8));
+        assertEquals(java.util.Arrays.asList("a-1.0.jar"), jarNames(resolve("implementation(\"lib:a:1.0@jar\")")));
+    }
+
+    @Test public void artifactOnlyAarIsExtracted() throws IOException {
+        files.put("lib/a/1.0/a-1.0.aar", zip("AndroidManifest.xml", "<manifest/>", "classes.jar", "not really a jar"));
+        MavenResolver.Result result = resolve("implementation(\"lib:a:1.0@aar\")");
+        assertEquals(1, result.aarDirectories.size());
+        assertEquals(java.util.Arrays.asList("classes.jar"), jarNames(result));
+    }
 }

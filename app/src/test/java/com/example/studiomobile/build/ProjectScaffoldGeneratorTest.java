@@ -53,7 +53,7 @@ public class ProjectScaffoldGeneratorTest {
         assertTrue(JavaLanguageLevel.inspect(project).isValid());
         assertEquals("com.example.demo", BuildProjectFiles.readApplicationId(project, "x"));
         assertEquals("24", BuildProjectFiles.readNumericSdkValue(project, true, "0"));
-        assertEquals("36", BuildProjectFiles.readNumericSdkValue(project, false, "0"));
+        assertEquals(String.valueOf(LocalLibsInstaller.DEFAULT_API), BuildProjectFiles.readNumericSdkValue(project, false, "0"));
         GradleDependencyParser dependencies = GradleDependencyParser.parse(project, BuildProjectFiles.moduleDirectory(project));
         assertTrue(dependencies.declarations.isEmpty());
     }
@@ -94,6 +94,22 @@ public class ProjectScaffoldGeneratorTest {
         assertEquals("mine", read("app/src/main/AndroidManifest.xml"));
     }
 
+    @Test public void writesLauncherIconFilesAndPointsTheManifestAtThem() throws IOException {
+        java.util.Map<String, byte[]> icons = new java.util.LinkedHashMap<>();
+        icons.put("app/src/main/res/mipmap-hdpi/ic_launcher.png", new byte[]{1, 2, 3});
+        List<String> created = ProjectScaffoldGenerator.generate(project, "demo", "Demo", "com.example.demo", icons);
+        assertTrue(created.contains("app/src/main/res/mipmap-hdpi/ic_launcher.png"));
+        assertEquals(3, new File(project, "app/src/main/res/mipmap-hdpi/ic_launcher.png").length());
+        String manifest = read("app/src/main/AndroidManifest.xml");
+        assertTrue(manifest.contains("android:icon=\"@mipmap/ic_launcher\""));
+        assertTrue(manifest.contains("android:roundIcon=\"@mipmap/ic_launcher_round\""));
+    }
+
+    @Test public void manifestHasNoIconAttributesWithoutAnIcon() throws IOException {
+        ProjectScaffoldGenerator.generate(project, "demo", "Demo", "com.example.demo");
+        assertFalse(read("app/src/main/AndroidManifest.xml").contains("android:icon"));
+    }
+
     @Test public void rejectsInvalidPackage() throws IOException {
         try { ProjectScaffoldGenerator.generate(project, "demo", "Demo", "Not A Package"); fail("expected IllegalArgumentException"); }
         catch (IllegalArgumentException expected) { assertEquals(0, project.list().length); }
@@ -103,5 +119,42 @@ public class ProjectScaffoldGeneratorTest {
         ProjectScaffoldGenerator.generate(project, "a\"b$c", "Tom's <App> & \"Co\"", "com.example.demo");
         assertTrue(read("settings.gradle").contains("rootProject.name = \"a\\\"b\\$c\""));
         assertTrue(read("app/src/main/res/values/strings.xml").contains("Tom\\'s &lt;App&gt; &amp; \\\"Co\\\""));
+    }
+
+    @Test public void writesTheVersionAndSdkValuesChosenInTheWizard() throws IOException {
+        ProjectScaffoldGenerator.generate(project, "demo", "Demo", "com.example.demo", null, 7, "2.3.1", 23, 35);
+        String gradle = read("app/build.gradle");
+        assertTrue(gradle.contains("minSdk = 23"));
+        assertTrue(gradle.contains("targetSdk = 35"));
+        assertTrue(gradle.contains("versionCode = 7"));
+        assertTrue(gradle.contains("versionName = \"2.3.1\""));
+        // what the Home list and the build pipeline read back
+        assertEquals("23", BuildProjectFiles.readNumericSdkValue(project, true, "0"));
+        assertEquals("35", BuildProjectFiles.readNumericSdkValue(project, false, "0"));
+        assertTrue(new ProjectValidator().validate(project).isValid());
+    }
+
+    @Test public void compileSdkNeverDropsBelowTargetSdk() throws IOException {
+        ProjectScaffoldGenerator.generate(project, "demo", "Demo", "com.example.demo", null, 1, "1.0", 21, 40);
+        assertTrue(read("app/build.gradle").contains("compileSdk = 40"));
+    }
+
+    @Test public void blankVersionNameFallsBackAndQuotesAreEscaped() throws IOException {
+        ProjectScaffoldGenerator.generate(project, "demo", "Demo", "com.example.demo", null, 1, "  ", 24, 36);
+        assertTrue(read("app/build.gradle").contains("versionName = \"1.0\""));
+        File other = Files.createTempDirectory("scaffold-test2").toFile();
+        try {
+            ProjectScaffoldGenerator.generate(other, "demo", "Demo", "com.example.demo", null, 1, "1.0\"$x", 24, 36);
+            String gradle = new String(Files.readAllBytes(new File(other, "app/build.gradle").toPath()), StandardCharsets.UTF_8);
+            assertTrue(gradle.contains("versionName = \"1.0\\\"\\$x\""));
+        } finally { delete(other); }
+    }
+
+    @Test public void rejectsImpossibleVersionAndSdkValues() throws IOException {
+        try { ProjectScaffoldGenerator.generate(project, "demo", "Demo", "com.example.demo", null, 0, "1.0", 24, 36); fail(); }
+        catch (IllegalArgumentException expected) { }
+        try { ProjectScaffoldGenerator.generate(project, "demo", "Demo", "com.example.demo", null, 1, "1.0", 30, 28); fail(); }
+        catch (IllegalArgumentException expected) { }
+        assertEquals(0, project.list().length);
     }
 }

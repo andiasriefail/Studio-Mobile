@@ -98,22 +98,33 @@ public class VersionCatalogTest {
         assertEquals("4.5", only(toml, "x").version);
     }
 
-    @Test public void rangeNeedsAFixedPrefer() {
+    @Test public void rangeWithFixedPreferUsesThePrefer_andPlainRangeIsPassedOn() {
         String toml = "[libraries]\n"
             + "ok = { module = \"g:ok\", version = { strictly = \"[1.0,2.0)\", prefer = \"1.5\" } }\n"
-            + "bad = { module = \"g:bad\", version = { require = \"[1.0,2.0)\" } }\n"
+            + "open = { module = \"g:open\", version = { require = \"[1.0,2.0)\" } }\n"
             + "text = \"g:text:[1.0,2.0)\"\n";
         VersionCatalog catalog = VersionCatalog.parse(toml);
         assertEquals("1.5", catalog.library("ok").version);
         assertNull(catalog.library("ok").problem);
-        assertTrue(catalog.library("bad").problem.contains("range"));
-        assertTrue(catalog.library("text").problem.contains("range"));
+        // A range is no longer a problem: the resolver takes the highest version inside it.
+        assertNull(catalog.library("open").problem);
+        assertEquals("[1.0,2.0)", catalog.library("open").version);
+        assertNull(catalog.library("text").problem);
+        assertEquals("g:text:[1.0,2.0)", catalog.library("text").coordinates());
     }
 
-    @Test public void dynamicVersionsAreProblems() {
+    @Test public void dynamicVersionsArePassedOnToTheResolver() {
         VersionCatalog catalog = VersionCatalog.parse("[libraries]\nx = \"g:x:1.+\"\ny = { module = \"g:y\", version = \"latest.release\" }\n");
-        assertTrue(catalog.library("x").problem.contains("dynamic"));
-        assertTrue(catalog.library("y").problem.contains("dynamic"));
+        assertNull(catalog.library("x").problem);
+        assertEquals("1.+", catalog.library("x").version);
+        assertNull(catalog.library("y").problem);
+        assertEquals("latest.release", catalog.library("y").version);
+    }
+
+    @Test public void unsupportedDynamicVersionsAndVariablesAreProblems() {
+        VersionCatalog catalog = VersionCatalog.parse("[libraries]\nx = \"g:x:latest.integration\"\ny = { module = \"g:y\", version = \"${v}\" }\n");
+        assertTrue(catalog.library("x").problem.contains("cannot be resolved"));
+        assertTrue(catalog.library("y").problem.contains("variable"));
     }
 
     @Test public void emptyVersionTableIsAProblem() {

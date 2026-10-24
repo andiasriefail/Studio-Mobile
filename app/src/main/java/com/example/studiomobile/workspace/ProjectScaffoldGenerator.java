@@ -15,12 +15,17 @@ import java.util.regex.Pattern;
  * manifest, string/theme resources and one Activity). Pure Java; it never overwrites an existing file and removes
  * everything it wrote if a later write fails.
  *
+ * The version code/name and min/target SDK chosen in the wizard are written into app/build.gradle (defaults: 1, "1.0", 24, DEFAULT_API).
+ *
  * Like Android Studio, the manifest has no {@code package} attribute; the package comes from {@code namespace} in app/build.gradle.
  * (The in-process pipeline injects it before AAPT2 link, see ManifestPackage.)
  */
 public final class ProjectScaffoldGenerator {
     private static final Pattern PACKAGE_NAME = Pattern.compile("^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$");
     private static final String AGP_VERSION = "8.13.1";
+    private static final int DEFAULT_VERSION_CODE = 1;
+    private static final String DEFAULT_VERSION_NAME = "1.0";
+    private static final int DEFAULT_MIN_SDK = 24;
 
     private ProjectScaffoldGenerator() { }
 
@@ -32,21 +37,53 @@ public final class ProjectScaffoldGenerator {
      * @return project-relative paths of the files that were created
      */
     public static List<String> generate(File projectDirectory, String projectName, String applicationLabel, String packageName) throws IOException {
+        return generate(projectDirectory, projectName, applicationLabel, packageName, null);
+    }
+
+    /**
+     * Same as above, plus launcher icon files chosen in the wizard. {@code iconFiles} maps project-relative paths
+     * (for example {@code app/src/main/res/mipmap-hdpi/ic_launcher.png}) to their bytes; see {@link LauncherIconFiles}.
+     * When it is not empty the manifest gets {@code android:icon} and {@code android:roundIcon}.
+     */
+    public static List<String> generate(File projectDirectory, String projectName, String applicationLabel, String packageName, Map<String, byte[]> iconFiles) throws IOException {
+        return generate(projectDirectory, projectName, applicationLabel, packageName, iconFiles,
+            DEFAULT_VERSION_CODE, DEFAULT_VERSION_NAME, DEFAULT_MIN_SDK, com.example.studiomobile.build.LocalLibsInstaller.DEFAULT_API);
+    }
+
+    /**
+     * Same as above, plus the version and SDK values chosen in the wizard. They are written into {@code app/build.gradle}
+     * exactly as given, so the project list, the build pipeline and the editor all read what the user picked.
+     *
+     * @param versionCode positive integer for {@code versionCode}
+     * @param versionName blank falls back to {@value #DEFAULT_VERSION_NAME}
+     * @param minSdk      {@code minSdk}; must be at least 1 and not above {@code targetSdk}
+     * @param targetSdk   {@code targetSdk}; {@code compileSdk} is raised to it when it is higher than the default
+     */
+    public static List<String> generate(File projectDirectory, String projectName, String applicationLabel, String packageName, Map<String, byte[]> iconFiles,
+                                        int versionCode, String versionName, int minSdk, int targetSdk) throws IOException {
         if (projectDirectory == null || !projectDirectory.isDirectory()) throw new IllegalArgumentException("projectDirectory must be an existing directory");
         if (projectName == null || projectName.trim().isEmpty()) throw new IllegalArgumentException("projectName is required");
         if (packageName == null || !PACKAGE_NAME.matcher(packageName).matches()) throw new IllegalArgumentException("Invalid package name: " + packageName);
         String label = applicationLabel == null || applicationLabel.trim().isEmpty() ? projectName.trim() : applicationLabel.trim();
+        if (versionCode < 1) throw new IllegalArgumentException("versionCode must be at least 1: " + versionCode);
+        if (minSdk < 1) throw new IllegalArgumentException("minSdk must be at least 1: " + minSdk);
+        if (targetSdk < minSdk) throw new IllegalArgumentException("targetSdk (" + targetSdk + ") must not be lower than minSdk (" + minSdk + ")");
+        String version = versionName == null || versionName.trim().isEmpty() ? DEFAULT_VERSION_NAME : versionName.trim();
 
+        boolean withIcon = iconFiles != null && !iconFiles.isEmpty();
         Map<String, String> files = new LinkedHashMap<>();
         files.put("settings.gradle", settingsGradle(projectName.trim()));
         files.put("build.gradle", ROOT_BUILD_GRADLE);
         files.put("gradle/libs.versions.toml", VERSION_CATALOG);
-        files.put("app/build.gradle", appBuildGradle(packageName));
+        files.put("app/build.gradle", appBuildGradle(packageName, versionCode, version, minSdk, targetSdk));
         files.put("app/proguard-rules.pro", PROGUARD_RULES);
-        files.put("app/src/main/AndroidManifest.xml", manifest(packageName));
+        files.put("app/src/main/AndroidManifest.xml", manifest(packageName, withIcon));
         files.put("app/src/main/java/" + packageName.replace('.', '/') + "/MainActivity.java", mainActivity(packageName));
         files.put("app/src/main/res/values/strings.xml", strings(label));
         files.put("app/src/main/res/values/themes.xml", THEMES);
+
+        Map<String, byte[]> binaries = new LinkedHashMap<>();
+        if (withIcon) binaries.putAll(iconFiles);
 
         List<File> createdFiles = new ArrayList<>();
         List<File> createdDirectories = new ArrayList<>();
@@ -57,6 +94,14 @@ public final class ProjectScaffoldGenerator {
                 if (target.exists()) continue;
                 makeDirectories(target.getParentFile(), createdDirectories);
                 Files.write(target.toPath(), entry.getValue().getBytes(StandardCharsets.UTF_8));
+                createdFiles.add(target);
+                created.add(entry.getKey());
+            }
+            for (Map.Entry<String, byte[]> entry : binaries.entrySet()) {
+                File target = new File(projectDirectory, entry.getKey());
+                if (target.exists()) continue;
+                makeDirectories(target.getParentFile(), createdDirectories);
+                Files.write(target.toPath(), entry.getValue());
                 createdFiles.add(target);
                 created.add(entry.getKey());
             }
@@ -93,7 +138,7 @@ public final class ProjectScaffoldGenerator {
 
     private static final String VERSION_CATALOG =
         "# Version catalog. Studio Mobile resolves a library when build.gradle references it as libs.<alias>.\n"
-        + "# Not supported yet: libs.bundles.*, BOM/platform() versions, dynamic versions (+), classifiers.\n"
+        + "# Supported: libs.bundles.*, platform()/enforcedPlatform() BOMs, dynamic versions (1.+, [1.0,2.0), latest.release) and classifiers in build.gradle (g:a:v:classifier, g:a:v@aar).\n# Not supported: versions built from variables, latest.integration, and classifiers inside this catalog.\n"
         + "[versions]\n"
         + "agp = \"" + AGP_VERSION + "\"\n\n"
         + "[libraries]\n"
@@ -101,17 +146,19 @@ public final class ProjectScaffoldGenerator {
         + "[plugins]\n"
         + "android-application = { id = \"com.android.application\", version.ref = \"agp\" }\n";
 
-    private static String appBuildGradle(String packageName) {
+    private static String appBuildGradle(String packageName, int versionCode, String versionName, int minSdk, int targetSdk) {
+        // compileSdk must never be lower than targetSdk
+        int compileSdk = Math.max(com.example.studiomobile.build.LocalLibsInstaller.DEFAULT_API, targetSdk);
         return "plugins {\n    alias(libs.plugins.android.application)\n}\n\n"
             + "android {\n"
             + "    namespace = \"" + packageName + "\"\n"
-            + "    compileSdk = 36\n\n"
+            + "    compileSdk = " + compileSdk + "\n\n"
             + "    defaultConfig {\n"
             + "        applicationId = \"" + packageName + "\"\n"
-            + "        minSdk = 24\n"
-            + "        targetSdk = 36\n"
-            + "        versionCode = 1\n"
-            + "        versionName = \"1.0\"\n"
+            + "        minSdk = " + minSdk + "\n"
+            + "        targetSdk = " + targetSdk + "\n"
+            + "        versionCode = " + versionCode + "\n"
+            + "        versionName = \"" + groovyString(versionName) + "\"\n"
             + "    }\n\n"
             + "    buildTypes {\n"
             + "        release {\n"
@@ -143,12 +190,14 @@ public final class ProjectScaffoldGenerator {
         + "# Keep readable stack traces (already on when using the default rules); mapping.txt is saved next to the APK:\n"
         + "#-keepattributes SourceFile,LineNumberTable\n";
 
-    private static String manifest(String packageName) {
+    private static String manifest(String packageName, boolean withIcon) {
         return "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
             + "<manifest xmlns:android=\"http://schemas.android.com/apk/res/android\">\n\n"
             + "    <application\n"
             + "        android:allowBackup=\"true\"\n"
+            + (withIcon ? "        android:icon=\"@mipmap/ic_launcher\"\n" : "")
             + "        android:label=\"@string/app_name\"\n"
+            + (withIcon ? "        android:roundIcon=\"@mipmap/ic_launcher_round\"\n" : "")
             + "        android:theme=\"@style/Theme.App\">\n"
             + "        <activity\n"
             + "            android:name=\".MainActivity\"\n"

@@ -37,15 +37,20 @@ public final class InProcessCompilerEngine {
 
     public CompilationOutput compileJava(List<File> sourceFiles, File androidJar,
             List<File> classpathEntries, File outputDirectory) throws Exception {
+        return compileJava(sourceFiles, androidJar, classpathEntries, outputDirectory, JavaLanguageLevel.REQUIRED);
+    }
+
+    public CompilationOutput compileJava(List<File> sourceFiles, File androidJar,
+            List<File> classpathEntries, File outputDirectory, int javaLevel) throws Exception {
         if (sourceFiles == null || sourceFiles.isEmpty()) return new CompilationOutput(true, "No Java source files.");
         requireFile(androidJar, "Android platform android.jar");
         if (!outputDirectory.isDirectory() && !outputDirectory.mkdirs())
             throw new IllegalStateException("Could not create Java class output directory: " + outputDirectory);
 
         List<String> args = new ArrayList<>();
-        // Java 21 is the level every project is compiled as. ECJ rejects -bootclasspath at compliance 9+, so android.jar is placed
-        // first on the regular classpath instead; D8 desugars the Java 21 classes for the app's minSdk.
-        String level = String.valueOf(JavaLanguageLevel.REQUIRED);
+        // ECJ rejects -bootclasspath at compliance 9+, so android.jar is placed
+        // first on the regular classpath instead; D8 desugars the classes for the app's minSdk.
+        String level = JavaLanguageLevel.flag(javaLevel);
         args.add("-source"); args.add(level);
         args.add("-target"); args.add(level);
         args.add("-encoding"); args.add("UTF-8");
@@ -73,7 +78,7 @@ public final class InProcessCompilerEngine {
         } catch (Exception | LinkageError error) {
             diagnostics = "ECJ in-process API unavailable: " + error.getClass().getName() + ": " + error.getMessage() + stackSummary(error, 10);
         }
-        CompilationOutput fallback = compileJavaFallback(args, sourceFiles, androidJar, classpathEntries, outputDirectory, diagnostics);
+        CompilationOutput fallback = compileJavaFallback(args, sourceFiles, androidJar, classpathEntries, outputDirectory, diagnostics, level);
         if (fallback != null) return fallback;
         return new CompilationOutput(false, diagnostics + "\nNo usable Java compiler fallback found. Expected executable build-tools/ecj or build-tools/javac.");
     }
@@ -263,6 +268,11 @@ public final class InProcessCompilerEngine {
     /** Invokes the embeddable Kotlin CLI in-process. Diagnostics are captured for the build log. */
     public CompilationOutput compileKotlin(List<File> kotlinSources, List<File> javaSourceRoots,
             File androidJar, List<File> classpathEntries, File outputDirectory) throws Exception {
+        return compileKotlin(kotlinSources, javaSourceRoots, androidJar, classpathEntries, outputDirectory, JavaLanguageLevel.REQUIRED);
+    }
+
+    public CompilationOutput compileKotlin(List<File> kotlinSources, List<File> javaSourceRoots,
+            File androidJar, List<File> classpathEntries, File outputDirectory, int javaLevel) throws Exception {
         if (kotlinSources == null || kotlinSources.isEmpty()) return new CompilationOutput(true, "No Kotlin source files.");
         requireFile(androidJar, "Android platform android.jar");
         if (!outputDirectory.isDirectory() && !outputDirectory.mkdirs())
@@ -272,7 +282,12 @@ public final class InProcessCompilerEngine {
         clearClassFiles(outputDirectory);
         List<String> args = new ArrayList<>();
         args.add("-no-stdlib"); args.add("-no-reflect");
-        args.add("-jvm-target"); args.add(String.valueOf(JavaLanguageLevel.REQUIRED));
+        // On Android the compiler is dexed, so PathUtil cannot find its own class as a jar resource
+        // ("Resource not found: /org/jetbrains/kotlin/utils/PathUtil.class"). An explicit -kotlin-home skips that lookup.
+        File kotlinHome = new File(toolsDirectory != null ? toolsDirectory : outputDirectory, toolsDirectory != null ? "kotlin-home" : ".kotlin-home");
+        kotlinHome.mkdirs();
+        args.add("-kotlin-home"); args.add(kotlinHome.getAbsolutePath());
+        args.add("-jvm-target"); args.add(JavaLanguageLevel.flag(javaLevel));
         // Kotlin 2.4.20 compiles `when` with several `is` checks to invokedynamic (SwitchBootstraps.typeSwitch) at JVM 21+, which Android does not have.
         // Keep the classic instanceof chain so the DEX never depends on it.
         args.add("-Xwhen-expressions=inline");
@@ -327,7 +342,7 @@ public final class InProcessCompilerEngine {
 
 
     private CompilationOutput compileJavaFallback(List<String> originalArgs, List<File> sourceFiles,
-            File androidJar, List<File> classpathEntries, File outputDirectory, String primaryError) {
+            File androidJar, List<File> classpathEntries, File outputDirectory, String primaryError, String level) {
         if (toolsDirectory == null) return null;
         File ecj = new File(toolsDirectory, "ecj");
         File javac = new File(toolsDirectory, "javac");
@@ -338,8 +353,8 @@ public final class InProcessCompilerEngine {
             List<String> command = new ArrayList<>();
             command.add(executable.getAbsolutePath());
             if (executable.getName().equals("javac")) {
-                command.add("-source"); command.add(String.valueOf(JavaLanguageLevel.REQUIRED));
-                command.add("-target"); command.add(String.valueOf(JavaLanguageLevel.REQUIRED));
+                command.add("-source"); command.add(level);
+                command.add("-target"); command.add(level);
                 command.add("-proc:none");
                 command.add("-classpath"); command.add(joinClasspath(classpathEntries));
                 command.add("-d"); command.add(outputDirectory.getAbsolutePath());

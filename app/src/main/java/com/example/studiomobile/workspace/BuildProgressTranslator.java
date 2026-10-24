@@ -39,10 +39,33 @@ final class BuildProgressTranslator {
      */
     static final String[] DOWNLOAD_LABELS = {"[maven]", "[download]", "[dns]"};
 
+    /**
+     * Tags written by the build pipelines for the screen. "[step] text" is a timed detail line of its own (and the live line),
+     * "[progress] text" only updates the live line, and "[internal] text" is bookkeeping that never reaches the screen. Tagged
+     * text is written by Studio Mobile in plain words, so it is never mistaken for a problem; warnings and errors are never tagged.
+     */
+    static final String TAG_STEP = "[step]", TAG_PROGRESS = "[progress]", TAG_INTERNAL = "[internal]";
+
+    /** Friendly detail for a Gradle task: {text, task-name fragments...}. The more specific fragments come first; unlisted tasks stay hidden. */
+    private static final String[][] GRADLE_TASKS = {
+        {"Processing resources", "packagedebugresources", "mergedebugresources", "processdebugresources", "generatedebugresources", "mapdebugsourcesetpaths", "compiledebugaidl", "extractdeeplinks"},
+        {"Merging the manifest", "processdebugmanifest", "createdebugcompatiblescreenmanifests", "processdebugmanifestforpackage"},
+        {"Checking libraries", "checkdebugaarmetadata", "checkdebugduplicateclasses", "predebugbuild", "prebuild", "checkjetifier"},
+        {"Generating helper code", "generatedebugbuildconfig", "generatedebugresvalues", "kapt", "ksp"},
+        {"Compiling Kotlin code", "compiledebugkotlin"},
+        {"Compiling Java code", "compiledebugjavawithjavac"},
+        {"Converting code to run on Android", "dexbuilderdebug", "mergeextdexdebug", "mergeprojectdexdebug", "mergelibdexdebug", "mergedexdebug"},
+        {"Merging native libraries", "mergedebugnativelibs", "stripdebugdebugsymbols"},
+        {"Creating the app bundle", "packagedebugbundle", "builddebugprebundle", ":bundledebug", "mergedebugnativedebugmetadata"},
+        {"Signing the app", "validatesigningdebug", "signdebugbundle", "writedebugsigningconfigversions"},
+        {"Assembling the app file", "packagedebug", "createdebugapklistingfileredirect"},
+        {"Finishing up", "assembledebug"},
+    };
+
     /** Rules are checked in order, so the more specific (later) stages come first. */
     private static final String[][] RULES = {
         {"3", "packagedebugresources"},
-        {"8", "apk signing", "signing and verification", "app bundle packaging"},
+        {"8", "apk signing", "signing and verification", "app bundle packaging", "packagedebugbundle", "signdebugbundle", ":bundledebug"},
         {"7", "native c/c++ build", "apk packaging", "apk alignment", "packagedebug", "assembledebug"},
         {"6", "dex generation", "code shrinking", "dexbuilder", "mergeprojectdex", "mergeextdex"},
         {"5", "crash check"},
@@ -87,6 +110,11 @@ final class BuildProgressTranslator {
     static String liveText(String raw) {
         if (raw == null) return null;
         String lower = raw.toLowerCase(Locale.ROOT).trim();
+        String tagged = tagged(raw, TAG_STEP);
+        if (tagged != null) return tagged.isEmpty() ? null : tagged + "…";
+        tagged = tagged(raw, TAG_PROGRESS);
+        if (tagged != null) return tagged.isEmpty() ? null : tagged;
+        if (tagged(raw, TAG_INTERNAL) != null) return null;
         if (lower.startsWith("[dex]")) return dexActivity(raw.trim());
         if (isDownloadLabel(lower)) {
             if (lower.contains("-> failed")) return raw.trim();
@@ -105,9 +133,42 @@ final class BuildProgressTranslator {
             return null;
         }
         if (looksLikeProblem(lower)) return raw.trim();
+        String gradle = gradleText(raw);
+        if (gradle != null) return gradle + "…";
         for (String[] rule : ACTIVITY) if (lower.contains(rule[0])) return rule[1];
         return null;
     }
+
+    /** The text after the given tag, or null when the line does not start with it. */
+    private static String tagged(String raw, String tag) {
+        String text = raw.trim();
+        if (!text.regionMatches(true, 0, tag, 0, tag.length())) return null;
+        return text.substring(tag.length()).trim();
+    }
+
+    /** Plain-words description of a line of Gradle's own output (daemon start, project configuration, tasks), or null to hide it. */
+    private static String gradleText(String raw) {
+        String text = raw.trim();
+        String lower = text.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("starting a gradle daemon") || lower.contains("single-use daemon")) return "Starting the build engine";
+        if (lower.startsWith("> configure project")) return "Configuring the project";
+        if (lower.startsWith("downloading http")) {
+            java.util.regex.Matcher url = GET_URL_ANY.matcher(text);
+            if (url.find()) {
+                String file = url.group(1);
+                int query = file.indexOf('?');
+                if (query >= 0) file = file.substring(0, query);
+                if (!file.isEmpty()) return "Downloading " + file;
+            }
+            return "Downloading libraries";
+        }
+        if (lower.startsWith("> task :")) {
+            for (String[] rule : GRADLE_TASKS)
+                for (int i = 1; i < rule.length; i++) if (lower.contains(rule[i])) return rule[0];
+        }
+        return null;
+    }
+    private static final java.util.regex.Pattern GET_URL_ANY = java.util.regex.Pattern.compile("(?i)^downloading\\s+\\S*/([^/\\s]+)");
 
     /** True for the fixed step labels (and the first "Preparing" line), so the log can tell a step from a detail or a message. */
     static boolean isStepLabel(String line) {
@@ -125,13 +186,17 @@ final class BuildProgressTranslator {
     static String historyText(String raw) {
         if (raw == null) return null;
         String lower = raw.toLowerCase(Locale.ROOT).trim();
+        String tagged = tagged(raw, TAG_STEP);
+        if (tagged != null) return tagged.isEmpty() ? null : tagged;
+        if (tagged(raw, TAG_PROGRESS) != null || tagged(raw, TAG_INTERNAL) != null) return null;
         if (lower.startsWith("[dex]")) {
             java.util.regex.Matcher m = DEX_LINE.matcher(raw.trim());
             if (m.matches()) return m.group(1).equals("start") ? "Part " + m.group(2) + "/" + m.group(3) + " · " + m.group(4) : null;
             return lower.contains("merging") ? "Combining all parts" : null;
         }
         if (isDownloadLabel(lower)) return lower.contains("-> failed") ? null : liveText(raw);
-        return null;
+        if (looksLikeProblem(lower)) return null;
+        return gradleText(raw);
     }
 
     private int reached = -1;
@@ -140,6 +205,7 @@ final class BuildProgressTranslator {
     synchronized String translate(String raw) {
         if (raw == null) return null;
         String lower = raw.toLowerCase(Locale.ROOT).trim();
+        if (tagged(raw, TAG_STEP) != null || tagged(raw, TAG_PROGRESS) != null || tagged(raw, TAG_INTERNAL) != null) return null;   // written for the screen already; never a problem, never a new step
         if (lower.startsWith("[dex]")) return null;   // progress of the DEX step: only the live line uses it (a JAR name may contain "error")
         if (isDownloadLabel(lower)) return lower.contains("-> failed") ? raw : advanceTo(DOWNLOAD_STEP);
         if (looksLikeProblem(lower)) return raw;

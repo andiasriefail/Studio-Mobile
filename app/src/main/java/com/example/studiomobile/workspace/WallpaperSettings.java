@@ -7,37 +7,62 @@ import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Matrix;
 import android.media.ExifInterface;
+import android.media.MediaMetadataRetriever;
 import android.net.Uri;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 
 /**
  * The editor wallpaper chosen by the user. The picture is copied into app-private storage (so it keeps working when the original
  * file is moved or its permission is gone) and the darkness laid over it is kept in app-private preferences.
+ * A wallpaper can also be a short video (at most {@link #MAX_VIDEO_SECONDS} seconds). The video is stored next to the picture and its
+ * first frame is stored as the picture, so the poster / preview / lazy loading path is the same for both kinds.
  */
 public final class WallpaperSettings {
     public static final int DEFAULT_DIM_PERCENT = 55;
     public static final int MAX_DIM_PERCENT = 85;
+    public static final int MAX_VIDEO_SECONDS = 60;
+    /** Players report a 60 second clip as e.g. 60.03 s, so a little slack is allowed. */
+    private static final long MAX_VIDEO_MS = MAX_VIDEO_SECONDS * 1000L + 500L;
+    private static final long MAX_VIDEO_BYTES = 500L * 1024 * 1024;
+    private static final int POSTER_MAX_SIDE = 1280;
+
+    /** The chosen video is longer than {@link #MAX_VIDEO_SECONDS} seconds. */
+    public static final class TooLongException extends IOException {
+        public TooLongException() { super("Video is longer than " + MAX_VIDEO_SECONDS + " seconds"); }
+    }
 
     private static final String PREFERENCES_NAME = "wallpaper_settings";
     private static final String KEY_DIM = "wallpaper_dim_percent";
     private static final String KEY_STAMP = "wallpaper_stamp";
     private static final String FILE_NAME = "wallpaper.jpg";
+    private static final String VIDEO_FILE_NAME = "wallpaper.mp4";
     private static final int MAX_SIDE = 2048;
     private static final int NIGHT_RGB = 0x1E1B3F;
 
     private final SharedPreferences preferences;
     private final File file;
+    private final File videoFile;
+    private final Context app;
 
     public WallpaperSettings(Context context) {
         Context app = context.getApplicationContext();
+        this.app = app;
+        this.videoFile = new File(app.getFilesDir(), VIDEO_FILE_NAME);
         this.preferences = app.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE);
         this.file = new File(app.getFilesDir(), FILE_NAME);
     }
 
     public boolean isSet() { return file.isFile() && file.length() > 0; }
+
+    /** True when the wallpaper is a live video (the picture file then holds its first frame). */
+    public boolean isVideo() { return isSet() && videoFile.isFile() && videoFile.length() > 0; }
+
+    /** The stored video file; only meaningful when {@link #isVideo()} is true. */
+    public File videoFile() { return videoFile; }
 
     /** Changes every time the picture changes, so callers can tell whether a cached bitmap is still current. */
     public long stamp() { return preferences.getLong(KEY_STAMP, 0L); }
@@ -63,6 +88,8 @@ public final class WallpaperSettings {
     public void clear() {
         //noinspection ResultOfMethodCallIgnored
         file.delete();
+        //noinspection ResultOfMethodCallIgnored
+        videoFile.delete();
         preferences.edit().putLong(KEY_STAMP, System.nanoTime()).apply();
     }
 
@@ -107,7 +134,65 @@ public final class WallpaperSettings {
             temp.delete();
             throw new IOException("Cannot save image");
         }
+        //noinspection ResultOfMethodCallIgnored
+        videoFile.delete();   // a picture replaces a former video wallpaper
         preferences.edit().putLong(KEY_STAMP, System.nanoTime()).apply();
         return decoded;
+    }
+
+    /**
+     * Stores the picked video (at most {@link #MAX_VIDEO_SECONDS} seconds) as the wallpaper, together with its first frame as the picture.
+     * Throws {@link TooLongException} for a longer video. Call off the UI thread.
+     */
+    public void importVideoFrom(ContentResolver resolver, Uri uri) throws IOException {
+        long durationMs;
+        Bitmap poster;
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(app, uri);
+            if (!"yes".equals(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_HAS_VIDEO))) throw new IOException("Not a video");
+            String duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            durationMs = duration == null ? 0L : Long.parseLong(duration);
+            poster = retriever.getFrameAtTime(0, MediaMetadataRetriever.OPTION_CLOSEST_SYNC);
+            if (poster == null) poster = retriever.getFrameAtTime();
+        } catch (RuntimeException e) {
+            throw new IOException("Cannot read video", e);
+        } finally {
+            try { retriever.release(); } catch (Exception ignored) { /* nothing to release */ }
+        }
+        if (durationMs <= 0 || poster == null) throw new IOException("Cannot read video");
+        if (durationMs > MAX_VIDEO_MS) throw new TooLongException();
+
+        int longest = Math.max(poster.getWidth(), poster.getHeight());
+        if (longest > POSTER_MAX_SIDE) {
+            float scale = POSTER_MAX_SIDE / (float) longest;
+            poster = Bitmap.createScaledBitmap(poster, Math.max(1, Math.round(poster.getWidth() * scale)), Math.max(1, Math.round(poster.getHeight() * scale)), true);
+        }
+
+        File videoTemp = new File(videoFile.getParentFile(), VIDEO_FILE_NAME + ".tmp");
+        File posterTemp = new File(file.getParentFile(), FILE_NAME + ".tmp");
+        try {
+            try (InputStream in = resolver.openInputStream(uri); OutputStream out = new FileOutputStream(videoTemp)) {
+                if (in == null) throw new IOException("Cannot open video");
+                byte[] buffer = new byte[64 * 1024];
+                long total = 0;
+                int read;
+                while ((read = in.read(buffer)) > 0) {
+                    total += read;
+                    if (total > MAX_VIDEO_BYTES) throw new IOException("Video file is too large");
+                    out.write(buffer, 0, read);
+                }
+            }
+            try (FileOutputStream out = new FileOutputStream(posterTemp)) {
+                if (!poster.compress(Bitmap.CompressFormat.JPEG, 90, out)) throw new IOException("Cannot save image");
+            }
+            if (!videoTemp.renameTo(videoFile) || !posterTemp.renameTo(file)) throw new IOException("Cannot save video");
+        } finally {
+            //noinspection ResultOfMethodCallIgnored
+            videoTemp.delete();
+            //noinspection ResultOfMethodCallIgnored
+            posterTemp.delete();
+        }
+        preferences.edit().putLong(KEY_STAMP, System.nanoTime()).apply();
     }
 }

@@ -41,9 +41,24 @@ public final class SelfCrashCatcher {
     public static final String CRASH_PROCESS_SUFFIX = ":studio_crash";
     private static final String PREFS = "studio_self_crash";
     private static final String KEY_LAST_EXIT = "last_exit_timestamp";
+    private static final String KEY_ENABLED = "enabled";
     private static volatile boolean installed;
 
     private SelfCrashCatcher() { }
+
+    /**
+     * The "Studio Mobile Debug Mode" switch in Settings. On by default. While it is off nothing is shown or saved: crashes go to Android's normal
+     * handling, the freeze watchdog stays quiet and earlier silent deaths are not reported. It is read at the moment something happens, so the
+     * switch works at once in the main process; the :javarun process starts fresh for every Run and reads the current value then.
+     */
+    public static boolean isEnabled(Context context) {
+        try { return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, true); }
+        catch (Throwable unreadable) { return true; }
+    }
+
+    public static void setEnabled(Context context, boolean enabled) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, enabled).apply();
+    }
 
     public static void install(final Application app) {
         if (installed) return;
@@ -55,7 +70,7 @@ public final class SelfCrashCatcher {
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
             @Override public void uncaughtException(Thread thread, Throwable error) {
                 boolean shown = false;
-                try { shown = handleCrash(app, processLabel, thread, error); } catch (Throwable ignored) { }
+                try { if (isEnabled(app)) shown = handleCrash(app, processLabel, thread, error); } catch (Throwable ignored) { }
                 if (!shown && previous != null) { previous.uncaughtException(thread, error); return; }
                 Process.killProcess(Process.myPid());
                 System.exit(10);
@@ -92,6 +107,7 @@ public final class SelfCrashCatcher {
                     if (now - sleepStart > PROCESS_PAUSE_MS) { lastBeat[0] = now; shown = false; lastDump = 0; episode = null; continue; }
                     long frozenFor = now - lastBeat[0];
                     if (frozenFor < FREEZE_MS) { shown = false; lastDump = 0; episode = null; continue; }
+                    if (!isEnabled(app)) { shown = false; lastDump = 0; episode = null; continue; }   // Debug Mode switched off in Settings
                     if (now - lastDump < 4000) continue;
                     lastDump = now;
                     try {
@@ -169,6 +185,13 @@ public final class SelfCrashCatcher {
         long seen = prefs.getLong(KEY_LAST_EXIT, 0);
         List<ApplicationExitInfo> exits = manager.getHistoricalProcessExitReasons(app.getPackageName(), 0, 5);
         if (exits == null || exits.isEmpty()) return;
+        if (!isEnabled(app)) {
+            // Switched off: report nothing, but mark these exits as seen so they do not all appear when it is switched on again.
+            long latest = seen;
+            for (ApplicationExitInfo info : exits) latest = Math.max(latest, info.getTimestamp());
+            prefs.edit().putLong(KEY_LAST_EXIT, latest).apply();
+            return;
+        }
         long newest = seen;
         StringBuilder text = new StringBuilder();
         for (ApplicationExitInfo info : exits) {
@@ -180,6 +203,7 @@ public final class SelfCrashCatcher {
                 || reason == ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE || reason == ApplicationExitInfo.REASON_INITIALIZATION_FAILURE
                 || reason == ApplicationExitInfo.REASON_UNKNOWN || reason == ApplicationExitInfo.REASON_DEPENDENCY_DIED;
             if (!abnormal) continue;
+            if (isOwnJavaRunKill(info)) continue;   // expected, not a crash (see below)
             text.append("Process: ").append(info.getProcessName()).append('\n');
             text.append("Time: ").append(format(new Date(info.getTimestamp()))).append('\n');
             text.append("Reason: ").append(reasonName(reason)).append(" (code ").append(reason).append(")\n");
@@ -206,6 +230,16 @@ public final class SelfCrashCatcher {
             + memoryInfo(app);
         save(app, report, "closed-by-system", newStamp());
         show(app, report);
+    }
+
+    /**
+     * JavaRunService ends its own process with Process.killProcess() after every Run (so the next Run starts clean), and Stop kills it too.
+     * Android records that as SIGNALED with status 9 (SIGKILL). It is normal housekeeping, so it must not be reported as "closed by the system".
+     * Only this exact combination is skipped: a real low-memory kill or native crash of :javarun has another reason code and is still reported.
+     */
+    private static boolean isOwnJavaRunKill(ApplicationExitInfo info) {
+        String name = info.getProcessName();
+        return info.getReason() == ApplicationExitInfo.REASON_SIGNALED && info.getStatus() == 9 && name != null && name.endsWith(":javarun");
     }
 
     private static final int KEEP_REPORTS = 10;
