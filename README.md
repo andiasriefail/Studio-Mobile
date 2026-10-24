@@ -275,6 +275,7 @@ Studio Mobile can **run a single file directly on the phone**, without building 
 |---|---|---|---|---|
 | `.py` | Run with Python | CPython 3.14.8 | 120 seconds | **arm64-v8a only**. The first run downloads the standard library once |
 | `.js`, `.mjs` | Run with JavaScript | Native Node.js 24.x (`libnodeexe.so`) | 120 seconds | All ABIs. `.js` = CommonJS, `.mjs` = ES module |
+| `.sh`, `.bash` | Run with Shell | The phone's own shell (`/system/bin/sh`, mksh + toybox) | 120 seconds | **All ABIs**, nothing to download. Started as `sh file.sh`, so no executable bit is needed. Not full bash |
 | `.dart` | Run with Dart | Dart VM 3.13.5 | 180 seconds | **arm64-v8a only**. Core libraries only, no pub and no Flutter |
 | `.java` | Run with Java | ECJ → D8 → `main()` in a separate process | 120 seconds | The file must have `public static void main(String[] args)` |
 | `.kt` | Run with Kotlin | Kotlin compiler → D8 → `main()` in a separate process | 120 seconds | The file must have a `main` function |
@@ -285,8 +286,9 @@ General rules:
 - If the time limit is exceeded, the process is stopped and the output window writes `[timed out after 120 s]`
 - When finished, the output writes `[process finished with exit code N]`
 - **C/C++ has no Run button.** C/C++ code is built into `lib<name>.so` together with the app and called through JNI (see the example below)
-- Other files (for example `.lua`, `.rs`, `.sh`) can only be edited with syntax highlighting, without a Run menu
-- Python, Dart, and Node.js run from the editor **are script mode**. Only `src/main/dart/main.dart` is packaged into the APK, and JavaScript goes into the APK through `assets` (WebView). Python is not packaged into the APK
+- Other files (for example `.lua`, `.rs`) can only be edited with syntax highlighting, without a Run menu
+- Python, Dart, Node.js, and Shell run from the editor **are script mode**. Only `src/main/dart/main.dart` is packaged into the APK, and JavaScript goes into the APK through `assets` (WebView). Python and Shell scripts are not packaged into the APK
+- Shell scripts in `scripts/` can also run **automatically around a build**: `scripts/pre-build.sh` and `scripts/post-build.sh` (see [Shell scripts (.sh)](#shell-scripts-sh))
 
 **Example files to try**
 
@@ -301,6 +303,14 @@ print("Hello from Python", sys.version.split()[0])
 
 ```javascript
 console.log("Hello from Node.js", process.version);
+```
+
+`hello.sh`
+
+```sh
+#!/system/bin/sh
+echo "Hello from Shell"
+echo "Android $(getprop ro.build.version.release), $(uname -m)"
 ```
 
 `main.dart`
@@ -334,6 +344,16 @@ Example output in the Run window for `hello.py`:
 ```
 $ python hello.py
 Hello from Python 3.14.8
+
+[process finished with exit code 0]
+```
+
+Example output in the Run window for `hello.sh`:
+
+```
+$ sh hello.sh
+Hello from Shell
+Android 14, aarch64
 
 [process finished with exit code 0]
 ```
@@ -386,7 +406,10 @@ My Project/
 │   └── checksums.properties            # (optional) library SHA-256 pins
 ├── scripts/                            # (free) scripts run from the editor
 │   ├── hello.py                        # Python: Run with Python, NOT included in the APK
-│   └── tool.js                         # Node.js: Run with JavaScript
+│   ├── tool.js                         # Node.js: Run with JavaScript
+│   ├── hello.sh                        # Shell: Run with Shell, NOT included in the APK
+│   ├── pre-build.sh                    # (optional) Shell: runs automatically BEFORE the build
+│   └── post-build.sh                   # (optional) Shell: runs automatically AFTER the build ($STUDIO_APK)
 └── app/
     ├── build.gradle
     ├── libs/                           # (optional) local .jar files
@@ -423,9 +446,10 @@ Role of each part:
 | `src/main/cpp` | C/C++ | Yes (`lib<name>.so`) | Called through JNI |
 | `src/main/dart/main.dart` | Dart | Yes (kernel + Dart VM) | Called through `studio.dart.StudioDart` |
 | `src/main/jniLibs/<abi>` | Prebuilt `.so` | Yes | For non-arm64 phones (GitHub Actions result) |
-| `scripts/` (free name) | Python, Node.js | **No** | Run from the editor |
+| `scripts/` (free name) | Python, Node.js, Shell | **No** | Run from the editor |
+| `scripts/pre-build.sh`, `scripts/post-build.sh` | Shell | **No** (they run during the build) | Run automatically before / after the build; the app asks for permission first |
 
-> Note: Python, Dart, and C/C++ are for **arm64-v8a** only. On other phones, those parts cannot be built or run on the device; use prebuilt `.so` files in `jniLibs/<abi>/` for C/C++.
+> Note: Python, Dart, and C/C++ are for **arm64-v8a** only. Shell (`.sh`) and Node.js work on all ABIs. On other phones, those parts cannot be built or run on the device; use prebuilt `.so` files in `jniLibs/<abi>/` for C/C++.
 
 ### Key file examples
 
@@ -555,7 +579,25 @@ object Helper {
 }
 ```
 
-`scripts/hello.py` and `scripts/tool.js` can be run directly from the **⋮ → Run with Python / JavaScript** menu, without a build.
+`scripts/hello.py`, `scripts/tool.js`, and `scripts/hello.sh` can be run directly from the **⋮ → Run with Python / JavaScript / Shell** menu, without a build.
+
+`scripts/pre-build.sh` (example: write the build time into an asset before the APK is built)
+
+```sh
+#!/system/bin/sh
+# Working directory = project root. $STUDIO_PROJECT_DIR is the same folder.
+mkdir -p app/src/main/assets
+date > app/src/main/assets/build-time.txt
+echo "pre-build done"
+```
+
+`scripts/post-build.sh` (example: report the finished APK)
+
+```sh
+#!/system/bin/sh
+# $STUDIO_APK = path of the APK that was just built
+ls -l "$STUDIO_APK"
+```
 
 ---
 
@@ -1458,3 +1500,16 @@ Studio Mobile is released under the **PolyForm Noncommercial License 1.0.0** (`P
 | Redistributed for non-commercial purposes | |
 
 [CONTRIBUTING.md](CONTRIBUTING.md)
+
+## Shell scripts (.sh)
+
+Studio Mobile runs shell scripts with the phone's own shell (`/system/bin/sh`). Nothing is bundled or downloaded, and it works on every ABI (arm64-v8a, armeabi-v7a, x86, x86_64).
+
+- **Run a file:** open the menu of a `.sh` or `.bash` file and choose **Run with Shell**. The script is started as `sh script.sh`, so it does not need the executable bit (Android 10+ would refuse to execute files from the app's data folder anyway).
+- **Build hooks:** put these files in the `scripts/` folder of your project:
+  - `scripts/pre-build.sh` runs before the build (generate sources, copy assets, write a version file ...).
+  - `scripts/post-build.sh` runs after the APK was built; `$STUDIO_APK` is the path of the finished APK.
+  - Both run in the build copy of the project (never your own files), with the project root as working directory, and `$STUDIO_PROJECT_DIR` points to it. A non-zero exit code fails the build, and a script gets 10 minutes. This works for the local, Gradle and Flutter routes.
+  - Because scripts can come from an imported ZIP, the app asks "Run build scripts?" once per build before the first one runs.
+- **Limits:** only the system tools (toybox/mksh: `ls`, `cp`, `sed`, `grep`, ...) are available. This is mksh, not full bash, and programs inside the app's own folders cannot be executed by a script. `#!` lines are ignored.
+- The `check_syntax` MCP tool checks `.sh` files with `sh -n` (parse only, nothing runs).
