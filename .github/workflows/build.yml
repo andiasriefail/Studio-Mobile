@@ -282,7 +282,7 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '9.8.1'
+          gradle-version: '9.8.2'
           cache-disabled: false
           cache-read-only: false
       - name: Choose Gradle command
@@ -329,6 +329,8 @@ jobs:
           if-no-files-found: error
           retention-days: 14
       - name: Publish GitHub Release
+        # Only from the main branch; runs on other branches (Dependabot, PRs) just upload the artifact.
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
