@@ -8,7 +8,7 @@ material = "1.14.0"
 junit = "4.13.2"
 
 # Build engine
-ecj = "3.46.0"
+ecj = "3.46.100"
 kotlin-compiler = "2.4.20"
 r8 = "9.4.29"
 apksig = "9.4.1"
