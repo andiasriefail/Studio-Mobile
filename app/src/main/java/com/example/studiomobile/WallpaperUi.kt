@@ -10,6 +10,7 @@ import android.graphics.SurfaceTexture
 import android.media.MediaPlayer
 import android.net.Uri
 import android.provider.MediaStore
+import android.view.Gravity
 import android.view.Surface
 import android.view.TextureView
 import android.view.View
@@ -174,12 +175,53 @@ class WallpaperUi(private val host: MainActivity) {
         image.visibility = if (set) View.VISIBLE else View.GONE
         shade.visibility = if (set) View.VISIBLE else View.GONE
         if (!set) { image.setImageDrawable(null); return }
+        (image.parent as? FrameLayout)?.let { keepFullSize(it, image, shade) }
         shade.setBackgroundColor(WallpaperSettings.dimColor(settings.dimPercent()))
         if (settings.isVideo) attachVideo(image, settings)
         withWallpaper { decoded ->
             if (host.screen == MainActivity.Screen.EDITOR) {
                 host.screenView.findViewById<ImageView>(R.id.editor_wallpaper)?.setImageBitmap(decoded)
             }
+        }
+    }
+
+
+    // ------------------------------------------------------------------ full-size wallpaper
+    //
+    // The wallpaper always fills the whole editor area edge to edge (centerCrop, no side bars) and keeps its size when the keyboard opens:
+    // MainActivity shrinks the screen for the keyboard, so the wallpaper layers are pinned to the tallest height seen (the keyboard-closed
+    // height) and anchored to the top. The shrinking area then only clips the bottom instead of rescaling the picture.
+
+    private var watchedFrame: FrameLayout? = null
+    private var pinnedWidth = 0
+    private var pinnedHeight = 0
+
+    private fun keepFullSize(frame: FrameLayout, image: ImageView, shade: View) {
+        pinnedWidth = 0
+        pinnedHeight = 0
+        pinLayers(frame, image, shade)
+        if (watchedFrame === frame) return
+        watchedFrame = frame
+        frame.addOnLayoutChangeListener { _, left, top, right, bottom, _, _, _, _ ->
+            val w = right - left
+            val h = bottom - top
+            if (w <= 0 || h <= 0) return@addOnLayoutChangeListener
+            if (w != pinnedWidth) { pinnedWidth = w; pinnedHeight = 0 }   // rotation / new width: start again from the new full height
+            if (h > pinnedHeight) {
+                pinnedHeight = h
+                pinLayers(frame, frame.findViewById(R.id.editor_wallpaper), frame.findViewById(R.id.editor_wallpaper_shade))
+            }
+        }
+    }
+
+    private fun pinLayers(frame: FrameLayout, image: View?, shade: View?) {
+        val height = if (pinnedHeight > 0) pinnedHeight else ViewGroup.LayoutParams.MATCH_PARENT
+        for (layer in listOf(image, shade, textureView)) {
+            if (layer == null) continue
+            val params = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, height, Gravity.TOP)
+            val old = layer.layoutParams as? FrameLayout.LayoutParams
+            if (old != null && old.height == params.height && old.gravity == params.gravity) continue
+            layer.layoutParams = params
         }
     }
 
@@ -209,7 +251,8 @@ class WallpaperUi(private val host: MainActivity) {
             override fun onSurfaceTextureUpdated(texture: SurfaceTexture) { }
         }
         // Above the picture, below the dark shade, so the darkness setting applies to the video too.
-        parent.addView(tv, parent.indexOfChild(poster) + 1, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        parent.addView(tv, parent.indexOfChild(poster) + 1, FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT, if (pinnedHeight > 0) pinnedHeight else ViewGroup.LayoutParams.MATCH_PARENT, Gravity.TOP))
         textureView = tv
         resumeAt = 0
         startVideo(settings)
@@ -246,14 +289,14 @@ class WallpaperUi(private val host: MainActivity) {
         }
     }
 
-    /** Scales the video to fit inside the area, centered, so nothing is cut off (like the picture's fitCenter). The rest of the area keeps the editor's background. */
+    /** Scales the video to cover the whole area, centered (like the picture's centerCrop): no side bars, the overflow is cropped. */
     private fun fitVideo(tv: TextureView, p: MediaPlayer) {
         val videoW = p.videoWidth.toFloat()
         val videoH = p.videoHeight.toFloat()
         val w = tv.width.toFloat()
         val h = tv.height.toFloat()
         if (videoW <= 0f || videoH <= 0f || w <= 0f || h <= 0f) return
-        val scale = minOf(w / videoW, h / videoH)
+        val scale = maxOf(w / videoW, h / videoH)
         val matrix = Matrix()
         matrix.setScale(videoW * scale / w, videoH * scale / h, w / 2f, h / 2f)
         tv.setTransform(matrix)
