@@ -167,7 +167,7 @@ jobs:
           done
           ls -l app/src/main/jniLibs/*/libnodeexe.so
       - name: Cache the Dart SDK archive
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/dart-sdk-cache
           key: dart-sdk-${{ hashFiles('tools/dart-sdk.json') }}
