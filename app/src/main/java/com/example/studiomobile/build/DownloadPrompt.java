@@ -42,6 +42,14 @@ public final class DownloadPrompt {
 
     /** @param what for example "Python", "Dart SDK" or "Android NDK". @return true when the download may start. */
     public static boolean allow(String what) {
+        return confirm("Download " + what + "?", what + " is not installed yet. Download it now?", "Download");
+    }
+
+    /**
+     * Shows a yes/no dialog from a background thread and waits for the answer. Same rules as {@link #allow}: plain JVM tests (not attached)
+     * get "yes", and on a phone the answer is "no" when no screen is showing or nobody answers for five minutes.
+     */
+    public static boolean confirm(String title, String message, String yesLabel) {
         if (!attached) return true;
         if (Looper.myLooper() == Looper.getMainLooper()) return true; // would block the screen that has to show the dialog
         Activity activity = visible.get();
@@ -51,11 +59,11 @@ public final class DownloadPrompt {
         activity.runOnUiThread(() -> {
             try {
                 new MaterialAlertDialogBuilder(activity)
-                    .setTitle("Download " + what + "?")
-                    .setMessage(what + " is not installed yet. Download it now?")
+                    .setTitle(title)
+                    .setMessage(message)
                     .setCancelable(false)
                     .setNegativeButton("Cancel", (dialog, which) -> answered.countDown())
-                    .setPositiveButton("Download", (dialog, which) -> { yes.set(true); answered.countDown(); })
+                    .setPositiveButton(yesLabel, (dialog, which) -> { yes.set(true); answered.countDown(); })
                     .show();
             } catch (RuntimeException windowGone) {
                 answered.countDown();
