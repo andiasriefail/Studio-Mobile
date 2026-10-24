@@ -38,6 +38,7 @@ public final class StudioStorage {
     public static final String PLAY_ICONS = "Icon Google Play Console";
     public static final String PLAY_ICON_FILE = "ic_launcher-playstore.png";
     public static final String ERROR_LOGS = "Build Error Logs";
+    public static final String GITHUB_ZIPS = "Github Application Zip";
     /** Crash and freeze reports of Studio Mobile itself. Kept apart from ERROR_LOGS, which only holds build error logs. */
     public static final String APP_CRASH_LOGS = "App Crash Logs";
     public static final int REQUEST_LEGACY_STORAGE = 4101;
@@ -79,11 +80,12 @@ public final class StudioStorage {
     public static File playIconDir(Context context, String projectName) { return new File(playIconsDir(context), projectName); }
     public static File localLibsDir(Context context) { return dir(root(context), LOCAL_LIBS); }
     public static File errorLogsDir(Context context) { return dir(root(context), ERROR_LOGS); }
+    public static File githubZipDir(Context context) { return dir(root(context), GITHUB_ZIPS); }
     public static File appCrashLogsDir(Context context) { return dir(root(context), APP_CRASH_LOGS); }
 
     /** Creates the whole folder layout. Safe to call repeatedly. */
     public static void ensureFolders(Context context) {
-        projectsDir(context); apkDir(context); exportAabDir(context); localLibsDir(context); errorLogsDir(context); playIconsDir(context);
+        projectsDir(context); apkDir(context); exportAabDir(context); localLibsDir(context); errorLogsDir(context); playIconsDir(context); githubZipDir(context);
     }
 
     private static File dir(File parent, String relative) {
