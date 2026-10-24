@@ -130,7 +130,7 @@ jobs:
           file "$dest/libpythonexe.so"
           ls -l "$dest"
       - name: Cache the Dart SDK archive
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ runner.temp }}/dart-sdk-cache
           key: dart-sdk-${{ hashFiles('tools/dart-sdk.json') }}
