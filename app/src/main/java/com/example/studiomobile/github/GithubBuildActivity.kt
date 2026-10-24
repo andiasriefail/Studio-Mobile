@@ -1,14 +1,19 @@
 package com.example.studiomobile.github
 
 import android.app.Dialog
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.Uri
+import android.media.MediaScannerConnection
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
+import android.os.Environment
 import android.os.Looper
+import android.provider.MediaStore
 import android.provider.Settings
 import android.text.Editable
 import android.text.InputType
@@ -38,7 +43,9 @@ import com.example.studiomobile.R
 import com.example.studiomobile.workspace.StudioStorage
 import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
+import java.io.OutputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -53,6 +60,8 @@ private class NestedLogScroll(context: Context) : ScrollView(context) {
         return super.dispatchTouchEvent(ev)
     }
 }
+
+private class ZipSink(val stream: OutputStream, val name: String, val finish: () -> Unit, val abort: () -> Unit)
 
 private class DownloadState {
     @Volatile var done = 0L
@@ -85,6 +94,9 @@ class GithubBuildActivity : AppCompatActivity() {
     private var reposState = 0
     private var reposError = ""
     private var repoPick: TextView? = null
+    @Volatile private var zipCancel = false
+    private var zipDialog: androidx.appcompat.app.AlertDialog? = null
+    private var zipLabel: TextView? = null
 
     private var owner = ""
     private var repo = ""
@@ -155,6 +167,8 @@ class GithubBuildActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         navigation++
+        zipCancel = true
+        zipDialog?.dismiss()
         for (state in downloads.values) state.cancel = true
         io.shutdownNow()
         super.onDestroy()
@@ -319,6 +333,13 @@ class GithubBuildActivity : AppCompatActivity() {
                 }
             }
             content.addView(views.button("Build", true) { build() }, views.params(top = 16))
+            content.addView(
+                views.button("Download repository ZIP", false) {
+                    urlText = input.text.toString().trim()
+                    zipFromUrl()
+                },
+                views.params(top = 10)
+            )
             val prefs = getSharedPreferences(GithubTokenStore.PREFS, MODE_PRIVATE)
             val lastRun = prefs.getLong("last_run", 0L)
             if (lastRun != 0L) {
@@ -427,10 +448,145 @@ class GithubBuildActivity : AppCompatActivity() {
         list.setOnItemClickListener { _, _, position, _ ->
             val item = shown[position]
             dialog.dismiss()
-            urlText = "https://github.com/${item.owner}/${item.name}"
-            startLoad()
+            MaterialAlertDialogBuilder(this)
+                .setTitle(item.fullName)
+                .setItems(arrayOf("Build with workflow", "Download ZIP")) { _, which ->
+                    if (which == 0) {
+                        urlText = "https://github.com/${item.owner}/${item.name}"
+                        startLoad()
+                    } else {
+                        downloadZip(item.owner, item.name, "")
+                    }
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
         }
         dialog.show()
+    }
+
+    private fun zipFromUrl() {
+        val parsed = GithubRepoUrl.parse(urlText)
+        if (parsed == null) {
+            urlError = "Enter a GitHub repository address, for example https://github.com/owner/repo"
+            showUrlPage()
+            return
+        }
+        urlError = ""
+        downloadZip(parsed.owner, parsed.repo, parsed.refHint)
+    }
+
+    private fun createZipSink(name: String): ZipSink {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues()
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+            values.put(MediaStore.MediaColumns.MIME_TYPE, "application/zip")
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+            values.put(MediaStore.MediaColumns.IS_PENDING, 1)
+            val uri = contentResolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: throw IOException("Could not create the file in Downloads.")
+            val stream = contentResolver.openOutputStream(uri)
+            if (stream == null) {
+                contentResolver.delete(uri, null, null)
+                throw IOException("Could not create the file in Downloads.")
+            }
+            val finish = {
+                val done = ContentValues()
+                done.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                contentResolver.update(uri, done, null, null)
+                Unit
+            }
+            val abort = {
+                contentResolver.delete(uri, null, null)
+                Unit
+            }
+            return ZipSink(stream, name, finish, abort)
+        }
+        val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        dir.mkdirs()
+        var file = File(dir, name)
+        var index = 1
+        while (file.exists()) {
+            file = File(dir, name.removeSuffix(".zip") + " (" + index + ").zip")
+            index++
+        }
+        val target = file
+        val stream = FileOutputStream(target)
+        val finish = {
+            MediaScannerConnection.scanFile(this, arrayOf(target.absolutePath), arrayOf("application/zip"), null)
+            Unit
+        }
+        val abort = {
+            target.delete()
+            Unit
+        }
+        return ZipSink(stream, target.name, finish, abort)
+    }
+
+    private fun showZipDialog(title: String) {
+        val row = LinearLayout(this)
+        row.orientation = LinearLayout.HORIZONTAL
+        row.gravity = Gravity.CENTER_VERTICAL
+        row.setPadding(views.dp(24), views.dp(16), views.dp(24), views.dp(8))
+        row.addView(views.spinner(), LinearLayout.LayoutParams(views.dp(28), views.dp(28)))
+        val label = views.text("Preparing...", 14f, R.color.cosmic_ink)
+        val params = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
+        params.marginStart = views.dp(14)
+        row.addView(label, params)
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle(title)
+            .setView(row)
+            .setNegativeButton("Cancel") { _, _ -> zipCancel = true }
+            .setCancelable(false)
+            .create()
+        zipLabel = label
+        zipDialog = dialog
+        dialog.show()
+    }
+
+    private fun closeZipDialog() {
+        zipDialog?.dismiss()
+        zipDialog = null
+        zipLabel = null
+    }
+
+    private fun downloadZip(ownerNow: String, repoNow: String, refIn: String) {
+        if (zipDialog != null) return
+        zipCancel = false
+        showZipDialog("$ownerNow/$repoNow")
+        io.execute {
+            try {
+                val refName = if (refIn.isEmpty()) api.repo(ownerNow, repoNow).defaultBranch else refIn
+                val sink = createZipSink(GithubFormat.safeName("$repoNow-$refName") + ".zip")
+                var lastPost = 0L
+                try {
+                    api.downloadRepoZip(ownerNow, repoNow, refName, sink.stream, { done ->
+                        val now = System.currentTimeMillis()
+                        if (now - lastPost > 300) {
+                            lastPost = now
+                            main.post { zipLabel?.text = "Downloading " + GithubFormat.bytes(done) }
+                        }
+                    }, { zipCancel })
+                    sink.stream.close()
+                    sink.finish()
+                } catch (e: Exception) {
+                    try {
+                        sink.stream.close()
+                    } catch (ignored: Exception) {
+                    }
+                    sink.abort()
+                    throw e
+                }
+                main.post {
+                    closeZipDialog()
+                    toast("Saved in Downloads: " + sink.name)
+                }
+            } catch (e: Exception) {
+                main.post {
+                    closeZipDialog()
+                    toast(if (zipCancel) "Download cancelled" else message(e))
+                }
+            }
+        }
     }
 
     private fun startLoad() {
@@ -555,6 +711,7 @@ class GithubBuildActivity : AppCompatActivity() {
         }
         content.addView(views.label("Use workflow from"))
         content.addView(views.button("⎇  $ref  ▾", false) { showRefPicker() }, views.params())
+        content.addView(views.button("Download ZIP of $ref", false) { downloadZip(owner, repo, ref) }, views.params(top = 8))
         content.addView(views.label("Workflows"))
         for (workflow in workflows) content.addView(workflowRow(workflow), views.params(top = 8))
 

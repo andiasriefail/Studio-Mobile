@@ -3,6 +3,7 @@ package com.example.studiomobile.github
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
@@ -270,6 +271,39 @@ class GithubApi(private val token: String) {
         try {
             target.parentFile?.mkdirs()
             conn.inputStream.use { input -> target.outputStream().use { input.copyTo(it) } }
+        } finally {
+            conn.disconnect()
+        }
+    }
+
+    fun downloadRepoZip(
+        owner: String,
+        repo: String,
+        ref: String,
+        target: OutputStream,
+        progress: (Long) -> Unit,
+        cancelled: () -> Boolean
+    ) {
+        val conn = redirected("/repos/${encode(owner)}/${encode(repo)}/zipball/${encodePath(ref)}")
+        try {
+            conn.inputStream.use { input ->
+                val buffer = ByteArray(64 * 1024)
+                var done = 0L
+                var reported = 0L
+                while (true) {
+                    if (cancelled()) throw IOException("Cancelled")
+                    val count = input.read(buffer)
+                    if (count < 0) break
+                    target.write(buffer, 0, count)
+                    done += count
+                    if (done - reported >= 256 * 1024) {
+                        reported = done
+                        progress(done)
+                    }
+                }
+                target.flush()
+                progress(done)
+            }
         } finally {
             conn.disconnect()
         }
