@@ -115,6 +115,7 @@ final class BuildProgressTranslator {
         tagged = tagged(raw, TAG_PROGRESS);
         if (tagged != null) return tagged.isEmpty() ? null : tagged;
         if (tagged(raw, TAG_INTERNAL) != null) return null;
+        if (isKnownNotice(lower)) return null;
         if (lower.startsWith("[dex]")) return dexActivity(raw.trim());
         if (isDownloadLabel(lower)) {
             if (lower.contains("-> failed")) return raw.trim();
@@ -189,6 +190,7 @@ final class BuildProgressTranslator {
         String tagged = tagged(raw, TAG_STEP);
         if (tagged != null) return tagged.isEmpty() ? null : tagged;
         if (tagged(raw, TAG_PROGRESS) != null || tagged(raw, TAG_INTERNAL) != null) return null;
+        if (isKnownNotice(lower)) return null;
         if (lower.startsWith("[dex]")) {
             java.util.regex.Matcher m = DEX_LINE.matcher(raw.trim());
             if (m.matches()) return m.group(1).equals("start") ? "Part " + m.group(2) + "/" + m.group(3) + " · " + m.group(4) : null;
@@ -206,6 +208,7 @@ final class BuildProgressTranslator {
         if (raw == null) return null;
         String lower = raw.toLowerCase(Locale.ROOT).trim();
         if (tagged(raw, TAG_STEP) != null || tagged(raw, TAG_PROGRESS) != null || tagged(raw, TAG_INTERNAL) != null) return null;   // written for the screen already; never a problem, never a new step
+        if (isKnownNotice(lower)) return null;   // stays in the full log, never on the screen
         if (lower.startsWith("[dex]")) return null;   // progress of the DEX step: only the live line uses it (a JAR name may contain "error")
         if (isDownloadLabel(lower)) return lower.contains("-> failed") ? raw : advanceTo(DOWNLOAD_STEP);
         if (looksLikeProblem(lower)) return raw;
@@ -259,6 +262,17 @@ final class BuildProgressTranslator {
     }
 
     /** Tool output arrives as plain lines, so errors and warnings have to be recognised by their wording. */
+    /**
+     * Notices AGP prints because of how Studio Mobile starts Gradle, which the reader cannot act on: the "experimental" warning for the
+     * aapt2 override (it also prints the app's private path) and its "Add android.sync.suppressAgpWarnings=..." follow-up line. Matched
+     * narrowly, so every other warning is still shown.
+     */
+    static boolean isKnownNotice(String lower) {
+        if (lower == null) return false;
+        if (lower.contains("aapt2frommavenoverride") && lower.contains("experimental")) return true;
+        return lower.contains("suppressagpwarnings=unsupported_project_option_use");
+    }
+
     static boolean looksLikeProblem(String lower) {
         if (lower.contains("using the in-process")) return false;   // a normal fallback notice (zipalign), not a problem
         return lower.contains("error") || lower.contains("exception") || lower.contains("warning")

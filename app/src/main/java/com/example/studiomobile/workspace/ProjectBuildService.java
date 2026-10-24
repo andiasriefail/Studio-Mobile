@@ -1,6 +1,7 @@
 package com.example.studiomobile.workspace;
 
 import android.content.Context;
+import android.os.SystemClock;
 
 import com.example.studiomobile.LanguageUi;
 import com.example.studiomobile.build.BuildConfiguration;
@@ -11,6 +12,7 @@ import com.example.studiomobile.build.GradleBuildPipeline;
 import com.example.studiomobile.build.LocalBuildPipeline;
 import com.example.studiomobile.build.LocalLibsInstaller;
 import com.example.studiomobile.build.dependency.ChecksumFailure;
+import com.example.studiomobile.build.network.NetworkMonitor;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -93,6 +95,13 @@ public final class ProjectBuildService {
     /** Set when a library failed its checksum check; the screen shows it once in a dialog (see {@link #takeChecksumFailure()}). */
     private volatile ChecksumFailure checksumFailure;
     private volatile String projectName = "";
+    /** How long Retry stays available after the connection was lost; nothing runs meanwhile, the window only limits how long the result stays retryable. */
+    private static final long RETRY_WINDOW_MILLIS = 5 * 60 * 1000L;
+    public static final long RETRY_BUSY = -1, RETRY_EXPIRED = -2, RETRY_OFFLINE = -3;
+    private volatile File retryProject;
+    private volatile boolean retryBundle;
+    private volatile long retryDeadlineElapsed;
+    private volatile boolean connectionTimeoutPending;
     private volatile BuildPipeline activePipeline;
     private volatile com.example.studiomobile.shell.BuildScriptHooks activeHooks;
     private volatile String lastLogLine = "";
@@ -106,6 +115,18 @@ public final class ProjectBuildService {
 
     private ProjectBuildService(Context appContext) {
         this.appContext = appContext;
+        initPathMask(appContext);
+    }
+
+    /** The app's private folder as this process sees it; the folder name is never written in code, so a new applicationId changes nothing. */
+    private static void initPathMask(Context context) {
+        try {
+            File parent = context.getFilesDir().getParentFile();
+            if (parent == null) return;
+            String canonical = null;
+            try { canonical = parent.getCanonicalPath(); } catch (IOException ignored) { }
+            LogPathMasker.init(parent.getAbsolutePath(), canonical);
+        } catch (RuntimeException ignored) { /* the generic patterns still apply */ }
     }
 
     // ------------------------------------------------------------------ public API
@@ -130,6 +151,28 @@ public final class ProjectBuildService {
     public String getLastAppName() { return lastAppName; }
 
     public String getLastMessage() { return lastMessage; }
+
+    /** True once after a build stopped because the connection was lost: the screen shows the Retry dialog and the next call gives false. */
+    public synchronized boolean takeConnectionTimeout() { boolean pending = connectionTimeoutPending; connectionTimeoutPending = false; return pending; }
+
+    /** Seconds left in which Retry is still offered after a lost connection; 0 when there is none or it ran out. */
+    public long getRetryRemainingSeconds() {
+        long deadline = retryDeadlineElapsed, left = deadline - SystemClock.elapsedRealtime();
+        return deadline == 0 || left <= 0 ? 0 : (left + 999) / 1000;
+    }
+
+    /**
+     * Starts the interrupted build again. Returns the new job id, or {@link #RETRY_BUSY}, {@link #RETRY_EXPIRED} (no window or it ran out)
+     * or {@link #RETRY_OFFLINE} (the system does not report a working connection yet; the window stays open).
+     */
+    public long retry() {
+        if (state == State.RUNNING) return RETRY_BUSY;
+        File project = retryProject;
+        if (project == null || getRetryRemainingSeconds() <= 0) return RETRY_EXPIRED;
+        if (!NetworkMonitor.isOnlineNow(appContext)) return RETRY_OFFLINE;
+        long id = start(project, retryBundle);   // starting clears the window
+        return id < 0 ? RETRY_BUSY : id;
+    }
 
     /** The checksum failure that stopped the last build, or null. Returns it once: the screen shows the dialog and the next call gives null. */
     public synchronized ChecksumFailure takeChecksumFailure() {
@@ -364,6 +407,10 @@ public final class ProjectBuildService {
             startedAtMillis = System.currentTimeMillis();
             finishedAtMillis = 0;
             projectName = project.getName();
+            retryProject = project;
+            retryBundle = bundle;
+            retryDeadlineElapsed = 0;
+            connectionTimeoutPending = false;
         }
         notifyState(State.RUNNING);
         addStep(LanguageUi.BUILD_PREPARING);
@@ -462,7 +509,10 @@ public final class ProjectBuildService {
             } else {
                 lastMessage = result.getMessage();
                 appendShown("BUILD " + result.getStatus() + ": " + result.getMessage());
-                if (result.getStatus() != BuildResult.Status.CANCELLED) appendTechnicalDetails();
+                if (result.getStatus() == BuildResult.Status.FAILED && lastMessage.startsWith(NetworkMonitor.CONNECTION_TIMEOUT_LABEL)) {
+                    retryDeadlineElapsed = SystemClock.elapsedRealtime() + RETRY_WINDOW_MILLIS;   // the screen offers Retry until this moment
+                    connectionTimeoutPending = true;
+                } else if (result.getStatus() != BuildResult.Status.CANCELLED) appendTechnicalDetails();
                 finalState = result.getStatus() == BuildResult.Status.CANCELLED ? State.CANCELLED : State.FAILED;
             }
         } catch (Throwable error) {
@@ -572,7 +622,7 @@ public final class ProjectBuildService {
     /** A progress line from the engine: shown only when it starts a new simple step (or when it looks like a warning or error). */
     private void appendInfo(String message) {
         appendDetail(message);
-        String live = BuildProgressTranslator.liveText(message);
+        String live = LogPathMasker.mask(BuildProgressTranslator.liveText(message));
         if (live != null) { if (!live.equals(liveLine)) liveSinceMillis = System.currentTimeMillis(); liveLine = live; }
         showProgress(progress.translate(message));
         String detail = BuildProgressTranslator.historyText(message);
@@ -583,13 +633,14 @@ public final class ProjectBuildService {
     private void appendShown(String message) {
         appendDetail(message);
         liveSinceMillis = System.currentTimeMillis();
-        liveLine = message == null ? "" : message;   // warnings and errors are shown exactly as written
+        liveLine = message == null ? "" : LogPathMasker.mask(message);   // warnings and errors are shown as written, minus the app's private folder
         showOnly(message);
     }
 
     /** Full log only. */
     private void appendDetail(String message) {
-        synchronized (lock) { log.append(message).append('\n'); lastLogLine = message; }
+        String safe = LogPathMasker.mask(message);
+        synchronized (lock) { log.append(safe).append('\n'); lastLogLine = safe; }
     }
 
     /** Lines from the translator: a fixed step label starts a new timed step, anything else (a warning or error) is shown as it is. */
@@ -620,8 +671,9 @@ public final class ProjectBuildService {
     }
 
     private void add(int kind, String text, boolean stamped) {
-        synchronized (lock) { entries.add(new Entry(kind, text, System.currentTimeMillis(), stamped)); }
-        for (Listener listener : listeners) listener.onLogAppended(text);
+        String safe = LogPathMasker.mask(text);
+        synchronized (lock) { entries.add(new Entry(kind, safe, System.currentTimeMillis(), stamped)); }
+        for (Listener listener : listeners) listener.onLogAppended(safe);
     }
 
     /** After a failed build the screen also gets the engine's last lines, so the real cause is never out of sight. */
@@ -640,7 +692,7 @@ public final class ProjectBuildService {
         String lower = line.trim().toLowerCase(java.util.Locale.ROOT);
         return lower.isEmpty() || lower.startsWith("[internal]") || lower.startsWith("[step]") || lower.startsWith("[progress]")
             || lower.startsWith("toolchain install") || lower.startsWith("android.jar api") || lower.startsWith("kotlin-stdlib")
-            || lower.contains("catalog entry") || lower.contains("/data/user/") || lower.contains("gradle-runtime");
+            || lower.contains("catalog entry") || lower.contains("/data/user/") || lower.contains(LogPathMasker.MARK) || lower.contains("gradle-runtime");
     }
 
     private void notifyState(State newState) {
