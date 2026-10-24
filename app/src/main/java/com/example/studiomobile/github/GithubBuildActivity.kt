@@ -1,5 +1,7 @@
 package com.example.studiomobile.github
 
+import android.app.Dialog
+import android.content.Context
 import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -12,6 +14,7 @@ import android.text.Editable
 import android.text.InputType
 import android.text.TextWatcher
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -41,6 +44,16 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.zip.ZipFile
 
+private class NestedLogScroll(context: Context) : ScrollView(context) {
+    override fun dispatchTouchEvent(ev: MotionEvent): Boolean {
+        when (ev.actionMasked) {
+            MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> parent?.requestDisallowInterceptTouchEvent(true)
+            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> parent?.requestDisallowInterceptTouchEvent(false)
+        }
+        return super.dispatchTouchEvent(ev)
+    }
+}
+
 private class DownloadState {
     @Volatile var done = 0L
     @Volatile var total = 0L
@@ -68,6 +81,10 @@ class GithubBuildActivity : AppCompatActivity() {
     private var loadingRepo = false
     private var urlText = ""
     private var urlError = ""
+    private var myRepos: List<RepoItem> = emptyList()
+    private var reposState = 0
+    private var reposError = ""
+    private var repoPick: TextView? = null
 
     private var owner = ""
     private var repo = ""
@@ -100,6 +117,10 @@ class GithubBuildActivity : AppCompatActivity() {
     private var stepsBox: LinearLayout? = null
     private var logView: TextView? = null
     private var logScroll: ScrollView? = null
+    private var errorsCard: LinearLayout? = null
+    private var errorsView: TextView? = null
+    private var fullLogView: TextView? = null
+    private var fullLogScroll: ScrollView? = null
     private var stopButton: TextView? = null
     private var githubButton: TextView? = null
     private var artifactBox: LinearLayout? = null
@@ -120,6 +141,7 @@ class GithubBuildActivity : AppCompatActivity() {
             }
         })
         showUrlPage()
+        loadRepos()
     }
 
     override fun onResume() {
@@ -241,17 +263,35 @@ class GithubBuildActivity : AppCompatActivity() {
         val content = pageColumn()
         content.addView(
             views.text(
-                "Paste the address of a GitHub repository. Studio Mobile reads its workflows, lets you pick the branch and inputs, runs the workflow on GitHub and downloads the result.",
+                "Choose one of your repositories or paste the address of any GitHub repository. Studio Mobile reads its workflows, lets you pick the branch and inputs, runs the workflow on GitHub and downloads the result.",
                 14f,
                 R.color.cosmic_muted
             )
         )
+        content.addView(views.label("Your repositories"))
+        val pick = views.button("", false) { showRepoPicker() }
+        pick.alpha = if (loading) 0.45f else 1f
+        repoPick = pick
+        updateRepoPick()
+        content.addView(pick, views.params())
+        content.addView(views.label("Or paste an address"))
         val input = views.input("https://github.com/owner/repo")
+        input.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
+            }
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+            }
+
+            override fun afterTextChanged(s: Editable?) {
+                urlText = s?.toString() ?: ""
+            }
+        })
         input.inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         input.imeOptions = EditorInfo.IME_ACTION_GO
         input.setText(urlText)
         input.isEnabled = !loading
-        content.addView(input, views.params(top = 16))
+        content.addView(input, views.params())
 
         if (urlError.isNotEmpty()) content.addView(views.text(urlError, 13f, R.color.cosmic_danger), views.params(top = 10))
 
@@ -291,6 +331,106 @@ class GithubBuildActivity : AppCompatActivity() {
             }
         }
         setPage(scrolled(content))
+    }
+
+    private fun updateRepoPick() {
+        val button = repoPick ?: return
+        button.text = when (reposState) {
+            0 -> "Loading repositories..."
+            1 -> if (myRepos.isEmpty()) "No repositories available" else "Select repository (${myRepos.size})  ▾"
+            else -> "Could not load repositories. Tap to retry"
+        }
+    }
+
+    private fun loadRepos() {
+        reposState = 0
+        reposError = ""
+        updateRepoPick()
+        io.execute {
+            try {
+                val list = api.repositories()
+                main.post {
+                    myRepos = list
+                    reposState = 1
+                    if (page == PAGE_URL) updateRepoPick()
+                }
+            } catch (e: Exception) {
+                main.post {
+                    reposState = 2
+                    reposError = message(e)
+                    if (page == PAGE_URL) updateRepoPick()
+                }
+            }
+        }
+    }
+
+    private fun showRepoPicker() {
+        if (loadingRepo) return
+        when (reposState) {
+            0 -> {
+                toast("Still loading your repositories...")
+                return
+            }
+            2 -> {
+                toast(reposError.ifEmpty { "Could not load repositories." })
+                loadRepos()
+                return
+            }
+        }
+        if (myRepos.isEmpty()) {
+            toast("This token cannot access any repository.")
+            return
+        }
+        var query = ""
+        val shown = ArrayList<RepoItem>()
+        val box = views.box()
+        box.setPadding(views.dp(20), views.dp(8), views.dp(20), 0)
+        val search = views.input("Find a repository")
+        box.addView(search, views.params())
+        val list = ListView(this)
+        val adapter = object : ArrayAdapter<RepoItem>(this, android.R.layout.simple_list_item_1, shown) {
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
+                val row = super.getView(position, convertView, parent) as TextView
+                val item = getItem(position)
+                row.text = if (item == null) "" else (if (item.isPrivate) "🔒  " else "") + item.fullName
+                row.setTextColor(views.res(R.color.cosmic_ink))
+                return row
+            }
+        }
+        list.adapter = adapter
+        box.addView(list, views.params(height = views.dp(360), top = 8))
+
+        fun refresh() {
+            shown.clear()
+            shown.addAll(myRepos.filter { it.fullName.contains(query, true) })
+            adapter.notifyDataSetChanged()
+        }
+        search.addTextChangedListener(object : TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {
+            }
+
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+            }
+
+            override fun afterTextChanged(s: Editable?) {
+                query = s?.toString()?.trim() ?: ""
+                refresh()
+            }
+        })
+        refresh()
+
+        val dialog = MaterialAlertDialogBuilder(this)
+            .setTitle("Your repositories")
+            .setView(box)
+            .setNegativeButton("Close", null)
+            .create()
+        list.setOnItemClickListener { _, _, position, _ ->
+            val item = shown[position]
+            dialog.dismiss()
+            urlText = "https://github.com/${item.owner}/${item.name}"
+            startLoad()
+        }
+        dialog.show()
     }
 
     private fun startLoad() {
@@ -774,7 +914,7 @@ class GithubBuildActivity : AppCompatActivity() {
             val active = activeJob(jobs)
             pollCount++
             val log = if (active != null && active.status != "queued" && (pollCount % 2 == 1 || run.status == "completed")) {
-                api.jobLogTail(ownerNow, repoNow, active.id, 400)
+                api.jobLogTail(ownerNow, repoNow, active.id, 5000)
             } else {
                 null
             }
@@ -866,6 +1006,7 @@ class GithubBuildActivity : AppCompatActivity() {
 
     private fun showRunPage() {
         page = PAGE_RUN
+        repoPick = null
         titleView.text = "$owner/$repo"
         actionView.visibility = View.GONE
 
@@ -899,16 +1040,45 @@ class GithubBuildActivity : AppCompatActivity() {
         content.addView(stepsCard, views.params())
 
         content.addView(views.label("Log"))
-        val scroll = ScrollView(this)
+        val errorsBox = views.card()
+        errorsBox.addView(views.text("Errors found in the log", 13f, R.color.cosmic_danger, true))
+        val errorsText = views.mono()
+        errorsText.setTextColor(views.res(R.color.cosmic_ink))
+        errorsText.maxLines = 24
+        errorsText.ellipsize = android.text.TextUtils.TruncateAt.END
+        errorsBox.addView(errorsText, views.params(top = 6))
+        errorsBox.visibility = View.GONE
+        content.addView(errorsBox, views.params())
+
+        val logTools = LinearLayout(this)
+        logTools.orientation = LinearLayout.HORIZONTAL
+        val toTop = views.button("Top", false) { logScroll?.fullScroll(View.FOCUS_UP) }
+        val toBottom = views.button("Bottom", false) { logScroll?.fullScroll(View.FOCUS_DOWN) }
+        val expand = views.button("Full screen", false) { showFullLog() }
+        for (tool in listOf(toTop, toBottom, expand)) {
+            tool.minHeight = views.dp(44)
+            tool.setPadding(views.dp(8), views.dp(8), views.dp(8), views.dp(8))
+        }
+        val toolParams = { start: Int, end: Int ->
+            val lp = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+            lp.marginStart = views.dp(start)
+            lp.marginEnd = views.dp(end)
+            lp
+        }
+        logTools.addView(toTop, toolParams(0, 4))
+        logTools.addView(toBottom, toolParams(4, 4))
+        logTools.addView(expand, toolParams(4, 0))
+        content.addView(logTools, views.params(top = 4))
+
+        val scroll = NestedLogScroll(this)
         scroll.setBackgroundResource(R.drawable.bg_log_box)
         scroll.setPadding(views.dp(14), views.dp(12), views.dp(14), views.dp(12))
+        scroll.isVerticalScrollBarEnabled = true
+        scroll.isScrollbarFadingEnabled = false
         val log = views.mono()
+        log.setTextIsSelectable(false)
         scroll.addView(log)
-        scroll.setOnTouchListener { v, _ ->
-            v.parent.requestDisallowInterceptTouchEvent(true)
-            false
-        }
-        content.addView(scroll, views.params(height = views.dp(300)))
+        content.addView(scroll, views.params(height = views.dp(480), top = 8))
 
         val buttons = LinearLayout(this)
         buttons.orientation = LinearLayout.HORIZONTAL
@@ -934,6 +1104,8 @@ class GithubBuildActivity : AppCompatActivity() {
         stepsBox = steps
         logView = log
         logScroll = scroll
+        errorsCard = errorsBox
+        errorsView = errorsText
         stopButton = stop
         githubButton = open
         artifactBox = results
@@ -1017,6 +1189,65 @@ class GithubBuildActivity : AppCompatActivity() {
                 if (atBottom) scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
             }
         }
+
+        val failed = run != null && run.status == "completed" && run.conclusion != "success"
+        val summary = if (failed) GithubLogText.errors(logText, 30) else ""
+        errorsView?.text = summary
+        errorsCard?.visibility = if (summary.isEmpty()) View.GONE else View.VISIBLE
+
+        val full = fullLogView
+        if (full != null && logText.isNotEmpty() && full.text.toString() != logText) {
+            val fullScrollView = fullLogScroll
+            val follow = fullScrollView == null || fullScrollView.getChildAt(0).bottom - (fullScrollView.height + fullScrollView.scrollY) < views.dp(48)
+            full.text = logText
+            if (follow) fullScrollView?.post { fullScrollView.fullScroll(View.FOCUS_DOWN) }
+        }
+    }
+
+    private fun showFullLog() {
+        val dialog = Dialog(this, android.R.style.Theme_DeviceDefault_NoActionBar)
+        val column = LinearLayout(this)
+        column.orientation = LinearLayout.VERTICAL
+        column.setBackgroundResource(R.color.log_bg)
+        column.setPadding(views.dp(12), views.dp(40), views.dp(12), views.dp(12))
+
+        val bar = LinearLayout(this)
+        bar.orientation = LinearLayout.HORIZONTAL
+        val scroll = ScrollView(this)
+        scroll.isVerticalScrollBarEnabled = true
+        scroll.isScrollbarFadingEnabled = false
+        val text = views.mono()
+        text.text = if (logText.isNotEmpty()) logText else "Waiting for log output..."
+        scroll.addView(text)
+
+        val close = views.button("Close", false) { dialog.dismiss() }
+        val top = views.button("Top", false) { scroll.fullScroll(View.FOCUS_UP) }
+        val bottom = views.button("Bottom", false) { scroll.fullScroll(View.FOCUS_DOWN) }
+        for (tool in listOf(close, top, bottom)) {
+            tool.minHeight = views.dp(44)
+            tool.setPadding(views.dp(8), views.dp(8), views.dp(8), views.dp(8))
+        }
+        val first = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        val second = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        val third = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
+        second.marginStart = views.dp(8)
+        third.marginStart = views.dp(8)
+        bar.addView(top, first)
+        bar.addView(bottom, second)
+        bar.addView(close, third)
+
+        column.addView(bar, views.params())
+        column.addView(scroll, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f).also { it.topMargin = views.dp(10) })
+        dialog.setContentView(column)
+        dialog.setOnDismissListener {
+            fullLogView = null
+            fullLogScroll = null
+        }
+        fullLogView = text
+        fullLogScroll = scroll
+        dialog.show()
+        dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+        scroll.post { scroll.fullScroll(View.FOCUS_DOWN) }
     }
 
     private fun stopRun() {

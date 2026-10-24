@@ -14,4 +14,20 @@ object GithubLogText {
         if (text.startsWith("##[command]")) return "\$ " + text.removePrefix("##[command]")
         return text
     }
+
+    private val problem = Regex("(?i)(error:|\\berror\\b.*\\b(failed|cannot|could not|not found)|FAILURE:|FAILED|what went wrong|exception|fatal:)")
+
+    @JvmStatic
+    fun errors(text: String, limit: Int): String {
+        if (text.isEmpty()) return ""
+        val hits = ArrayList<String>()
+        for (line in text.split('\n')) {
+            val trimmed = line.trim()
+            if (trimmed.isEmpty()) continue
+            if (trimmed.startsWith("✕") || problem.containsMatchIn(trimmed)) hits.add(trimmed)
+        }
+        val useful = hits.filter { !it.startsWith("✕ Process completed with exit code") }
+        val chosen = if (useful.isNotEmpty()) useful else hits
+        return chosen.takeLast(limit).joinToString("\n")
+    }
 }

@@ -14,6 +14,8 @@ class GithubApiException(val status: Int, message: String) : IOException(message
 
 class RepoInfo(val fullName: String, val defaultBranch: String, val isPrivate: Boolean)
 
+class RepoItem(val owner: String, val name: String, val fullName: String, val isPrivate: Boolean)
+
 class WorkflowInfo(val id: Long, val name: String, val path: String, val state: String)
 
 class RunInfo(
@@ -146,6 +148,24 @@ class GithubApi(private val token: String) {
     fun repo(owner: String, repo: String): RepoInfo {
         val json = JSONObject(call("GET", "/repos/${encode(owner)}/${encode(repo)}"))
         return RepoInfo(json.optString("full_name", "$owner/$repo"), json.optString("default_branch", "main"), json.optBoolean("private"))
+    }
+
+    fun repositories(): List<RepoItem> {
+        val out = ArrayList<RepoItem>()
+        val seen = HashSet<String>()
+        for (page in 1..10) {
+            val array = JSONArray(call("GET", "/user/repos?per_page=100&page=$page&sort=pushed&affiliation=owner,collaborator,organization_member"))
+            for (i in 0 until array.length()) {
+                val item = array.getJSONObject(i)
+                val fullName = item.optString("full_name")
+                val ownerName = item.optJSONObject("owner")?.optString("login").orEmpty()
+                val name = item.optString("name")
+                if (fullName.isEmpty() || ownerName.isEmpty() || name.isEmpty()) continue
+                if (seen.add(fullName.lowercase())) out.add(RepoItem(ownerName, name, fullName, item.optBoolean("private")))
+            }
+            if (array.length() < 100) break
+        }
+        return out
     }
 
     private fun names(owner: String, repo: String, kind: String): List<String> {

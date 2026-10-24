@@ -32,8 +32,9 @@ object GithubEntry {
         content.setPadding(views.dp(24), views.dp(8), views.dp(24), 0)
         content.addView(
             views.text(
-                "Enter a GitHub fine-grained personal access token for the repositories you want to build. " +
-                    "Give it these repository permissions: Actions (read and write) and Contents (read). " +
+                "Enter a GitHub personal access token. A fine-grained token needs the repository permissions Actions (read and write) and Contents (read). " +
+                    "A classic token needs the repo and workflow scopes. " +
+                    "Your repositories are listed automatically, based on what the token can access. " +
                     "The token is saved encrypted on this device.",
                 14f,
                 R.color.cosmic_muted
