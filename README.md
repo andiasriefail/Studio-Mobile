@@ -2,7 +2,7 @@
 
 An Android IDE that runs **directly on your phone**: write code, build APK/AAB, run scripts, and sign apps without a computer.
 
-- App: `minSdk 26` (Android 8.0+), `targetSdk 35`, built with `compileSdk 37`
+- App: `minSdk 26` (Android 8.0+), `targetSdk 37`, built with `compileSdk 37`
 - Can build projects with `compileSdk` / `targetSdk` up to **API 37 (Android 17)**
 - Main languages of the built app: **Java and Kotlin** (screens, logic, XML resources)
 
