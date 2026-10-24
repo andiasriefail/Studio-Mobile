@@ -94,6 +94,7 @@ public final class ProjectBuildService {
     private volatile ChecksumFailure checksumFailure;
     private volatile String projectName = "";
     private volatile BuildPipeline activePipeline;
+    private volatile com.example.studiomobile.shell.BuildScriptHooks activeHooks;
     private volatile String lastLogLine = "";
     /** Friendly "what is happening now" text for the Build screen and the notification; never contains tool names. */
     private volatile String liveLine = "";
@@ -372,6 +373,8 @@ public final class ProjectBuildService {
     }
 
     public void cancel() {
+        com.example.studiomobile.shell.BuildScriptHooks hooks = activeHooks;
+        if (hooks != null) hooks.cancel();
         BuildPipeline pipeline = activePipeline;
         if (pipeline != null) pipeline.cancel();
     }
@@ -431,7 +434,7 @@ public final class ProjectBuildService {
                 }
             };
 
-            BuildResult result = pipeline.build(configuration, logger);
+            BuildResult result = buildWithScripts(pipeline, configuration, buildRoot, logger);
             if (result.isSuccessful()) {
                 String appName = readAppName(buildRoot, project.getName());
                 lastAppName = appName;
@@ -472,6 +475,7 @@ public final class ProjectBuildService {
             appendShown("ERROR: Build stopped by " + error.getClass().getName() + ": " + error.getMessage() + "\n" + stackText);
         } finally {
             activePipeline = null;
+            activeHooks = null;
             if (finalState == State.FAILED) saveFailureReport(failureStage, crash);   // every failed build lands in Studio Mobile/Build Error Logs
             long endedAt = System.currentTimeMillis();
             finishedAtMillis = endedAt;
@@ -484,6 +488,37 @@ public final class ProjectBuildService {
             // The copy of the project is only needed while building; removing it here keeps the app's cache from growing with every build.
             if (copiedProject != null) com.example.studiomobile.build.BuildCacheCleaner.deleteTree(copiedProject);
         }
+    }
+
+    /**
+     * Runs scripts/pre-build.sh, the build itself, then scripts/post-build.sh (each only when the project has it). A failing script becomes a
+     * normal FAILED result with the script's own message, so the build screen shows it like any other build error.
+     */
+    private BuildResult buildWithScripts(BuildPipeline pipeline, BuildConfiguration configuration, File buildRoot, BuildLogger logger) throws Exception {
+        java.util.List<File> scripts = com.example.studiomobile.shell.BuildScriptHooks.find(buildRoot);
+        if (scripts.isEmpty()) return pipeline.build(configuration, logger);
+        java.util.List<String> problems = new ArrayList<>();
+        com.example.studiomobile.shell.ShellRuntime runtime = com.example.studiomobile.shell.ShellRuntime.locate(problems);
+        if (runtime == null) return new BuildResult(BuildResult.Status.FAILED, null, String.join(" ", problems));
+        com.example.studiomobile.shell.BuildScriptHooks hooks = new com.example.studiomobile.shell.BuildScriptHooks(
+            new com.example.studiomobile.shell.ShellScriptRunner(runtime, new File(appContext.getFilesDir(), "shell-home"), appContext.getCacheDir()),
+            names -> com.example.studiomobile.build.DownloadPrompt.confirm("Run build scripts?",
+                "This project wants to run shell scripts during the build:\n\n" + String.join("\n", names)
+                    + "\n\nOnly continue if you trust where this project came from.", "Run"));
+        activeHooks = hooks;
+        try {
+            hooks.runPreBuild(buildRoot, logger);
+        } catch (IllegalStateException failure) {
+            return new BuildResult(BuildResult.Status.FAILED, null, failure.getMessage());
+        }
+        BuildResult result = pipeline.build(configuration, logger);
+        if (!result.isSuccessful()) return result;
+        try {
+            hooks.runPostBuild(buildRoot, result.getApkFile(), logger);
+        } catch (IllegalStateException failure) {
+            return new BuildResult(BuildResult.Status.FAILED, null, failure.getMessage());
+        }
+        return result;
     }
 
     /** Writes the full log of a failed build to Studio Mobile/Build Error Logs (one file per app: <app name>-error-logs.txt). Never throws. */

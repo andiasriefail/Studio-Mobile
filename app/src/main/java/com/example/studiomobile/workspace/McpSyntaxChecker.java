@@ -7,6 +7,7 @@ import com.example.studiomobile.build.process.BuildProcessRunner;
 import com.example.studiomobile.dart.DartRuntime;
 import com.example.studiomobile.python.PythonRuntime;
 import com.example.studiomobile.script.JavaScriptRunner;
+import com.example.studiomobile.shell.ShellRuntime;
 
 import java.io.File;
 import java.io.IOException;
@@ -28,7 +29,7 @@ import java.util.regex.Pattern;
  * {@code RESULT:} (OK, SYNTAX ERRORS or NOT CHECKED) so an AI can read it without guessing.
  */
 public final class McpSyntaxChecker {
-    public static final String SUPPORTED_FILES = ".py, .dart, .js, .c, .cc, .cpp, .cxx, .h, .hpp";
+    public static final String SUPPORTED_FILES = ".py, .dart, .js, .sh, .bash, .c, .cc, .cpp, .cxx, .h, .hpp";
 
     private static final long TIMEOUT_SECONDS = 60;
     private static final int MAX_LINES = 40;
@@ -66,6 +67,7 @@ public final class McpSyntaxChecker {
         text.append("- Java: works on every ABI.\n");
         text.append("- JavaScript (Node.js): works on every ABI. Node in this app: ")
             .append(nativeLibraryDirectory == null ? "unknown" : JavaScriptRunner.isBundled(nativeLibraryDirectory) ? "bundled" : "missing").append(".\n");
+        text.append("- Shell scripts (.sh): work on every ABI with the phone's own sh (not full bash).\n");
         text.append("- Python, Dart and on-device C/C++: arm64-v8a only. This phone: ")
             .append(arm64 ? "supported" : "NOT supported (do not suggest them; C/C++ can be built on GitHub Actions into src/main/jniLibs)").append(".\n");
         if (arm64 && nativeLibraryDirectory != null) {
@@ -85,6 +87,7 @@ public final class McpSyntaxChecker {
             switch (language) {
                 case "javascript": return checkJavaScript(file, display);
                 case "python": return checkPython(file, display);
+                case "shell": return checkShell(file, display);
                 case "dart": return checkDart(file, display);
                 default: return checkNative(project, file, display, language);
             }
@@ -97,6 +100,7 @@ public final class McpSyntaxChecker {
     static String languageOf(String fileName) {
         String name = fileName.toLowerCase(Locale.ROOT);
         if (name.endsWith(".py")) return "python";
+        if (ShellRuntime.isShellScript(name)) return "shell";
         if (name.endsWith(".dart")) return "dart";
         if (name.endsWith(".js")) return "javascript";
         if (name.endsWith(".c")) return "c";
@@ -123,6 +127,17 @@ public final class McpSyntaxChecker {
         Collector output = new Collector();
         BuildProcessRunner.Result result = new BuildProcessRunner().run(command, file.getParentFile(), TIMEOUT_SECONDS, output, environment);
         return finish("javascript", file, display, result, output, "\nChecked with node --check (CommonJS rules for .js files); the file was only parsed, not run.");
+    }
+
+    // ------------------------------------------------------------------ Shell (system sh, every ABI)
+
+    private String checkShell(File file, String display) throws IOException, InterruptedException {
+        List<String> problems = new ArrayList<>();
+        ShellRuntime runtime = ShellRuntime.locate(problems);
+        if (runtime == null) return report("shell", "NOT CHECKED", join(problems));
+        Collector output = new Collector();
+        BuildProcessRunner.Result result = new BuildProcessRunner().run(runtime.syntaxCheckCommand(file), file.getParentFile(), TIMEOUT_SECONDS, output, null);
+        return finish("shell", file, display, result, output, "\nChecked with sh -n (the phone's own shell, which is not full bash); the file was only parsed, not run.");
     }
 
     // ------------------------------------------------------------------ Python (arm64-v8a)

@@ -87,7 +87,7 @@ public final class McpLimits {
         text.append("- Edit Gradle files: build.gradle(.kts), settings.gradle(.kts), gradle.properties, ")
             .append("gradle/libs.versions.toml and gradle/wrapper/gradle-wrapper.properties. ")
             .append("Edits to them return a limit check in the tool result.\n");
-        text.append("- Check: validate_project (static limits check), check_syntax (syntax of ONE file: .py, .dart, .js, .c, .cc, .cpp, .cxx, .h, .hpp; it never runs the code), ")
+        text.append("- Check: validate_project (static limits check), check_syntax (syntax of ONE file: .py, .dart, .js, .sh, .bash, .c, .cc, .cpp, .cxx, .h, .hpp; it never runs the code), ")
             .append("and read the state and logs of a build the USER started in the app: get_build_status, wait_for_build, get_build_log.\n");
         text.append("- check_syntax answers RESULT: OK, RESULT: SYNTAX ERRORS (with file and line) or RESULT: NOT CHECKED (with the reason, for example an unsupported phone). ")
             .append("Run it on every Python, Dart, JavaScript or C/C++ file you changed, fix real errors, and report NOT CHECKED to the user instead of guessing. ")
