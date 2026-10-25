@@ -1601,9 +1601,11 @@ public class MainActivity extends AppCompatActivity {
             ((TextView) screenView.findViewById(R.id.preview_mode)).setText(R.string.preview);
             message.setText(prepared.error);
             message.setVisibility(View.VISIBLE);
+            screenView.findViewById(R.id.preview_limits).setVisibility(View.GONE);
             return;
         }
         message.setVisibility(View.GONE);
+        screenView.findViewById(R.id.preview_limits).setVisibility(View.VISIBLE);
         screenView.findViewById(R.id.preview_tip).setVisibility(View.GONE);
         ((TextView) screenView.findViewById(R.id.preview_title)).setText(prepared.title);
         ((TextView) screenView.findViewById(R.id.preview_mode)).setText(prepared.modeLabel);

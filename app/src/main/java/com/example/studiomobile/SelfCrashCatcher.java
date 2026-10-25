@@ -1,5 +1,6 @@
 package com.example.studiomobile;
 
+import android.app.Activity;
 import android.app.ActivityManager;
 import android.app.ApplicationExitInfo;
 import android.app.Application;
@@ -7,6 +8,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Build;
+import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Process;
@@ -42,7 +44,10 @@ public final class SelfCrashCatcher {
     private static final String PREFS = "studio_self_crash";
     private static final String KEY_LAST_EXIT = "last_exit_timestamp";
     private static final String KEY_ENABLED = "enabled";
+    private static final String KEY_BUSY = "busy_when_died";
     private static volatile boolean installed;
+    private static volatile int startedActivities;
+    private static volatile boolean diedWhileBusy;
 
     private SelfCrashCatcher() { }
 
@@ -65,6 +70,9 @@ public final class SelfCrashCatcher {
         String process = processName(app);
         if (process != null && process.endsWith(CRASH_PROCESS_SUFFIX)) return;   // the crash page must never catch itself
         installed = true;
+        final boolean mainProcess = process == null || process.equals(app.getPackageName());
+        if (mainProcess) trackBusyState(app);
+        trackForeground(app);
         final Thread.UncaughtExceptionHandler previous = Thread.getDefaultUncaughtExceptionHandler();
         final String processLabel = process == null ? "?" : process;
         Thread.setDefaultUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
@@ -82,6 +90,31 @@ public final class SelfCrashCatcher {
                 @Override public void run() { try { reportPreviousSilentDeath(app); } catch (Throwable ignored) { } }
             }, 1500);
         }
+    }
+
+    private static void trackBusyState(final Application app) {
+        final SharedPreferences prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        diedWhileBusy = prefs.getBoolean(KEY_BUSY, false);
+        prefs.edit().putBoolean(KEY_BUSY, false).commit();
+        ActiveWork.setListener(new ActiveWork.Listener() {
+            @Override public void onBusyChanged(boolean busy) { prefs.edit().putBoolean(KEY_BUSY, busy).commit(); }
+        });
+    }
+
+    private static void trackForeground(Application app) {
+        app.registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+            @Override public void onActivityStarted(Activity activity) { startedActivities++; }
+            @Override public void onActivityStopped(Activity activity) { if (startedActivities > 0) startedActivities--; }
+            @Override public void onActivityCreated(Activity activity, Bundle state) { }
+            @Override public void onActivityResumed(Activity activity) { }
+            @Override public void onActivityPaused(Activity activity) { }
+            @Override public void onActivitySaveInstanceState(Activity activity, Bundle state) { }
+            @Override public void onActivityDestroyed(Activity activity) { }
+        });
+    }
+
+    private static boolean shouldReportFreeze() {
+        return startedActivities > 0 || ActiveWork.isBusy();
     }
 
     /**
@@ -108,6 +141,7 @@ public final class SelfCrashCatcher {
                     long frozenFor = now - lastBeat[0];
                     if (frozenFor < FREEZE_MS) { shown = false; lastDump = 0; episode = null; continue; }
                     if (!isEnabled(app)) { shown = false; lastDump = 0; episode = null; continue; }   // Debug Mode switched off in Settings
+                    if (!shouldReportFreeze()) { lastBeat[0] = now; shown = false; lastDump = 0; episode = null; continue; }
                     if (now - lastDump < 4000) continue;
                     lastDump = now;
                     try {
@@ -185,13 +219,14 @@ public final class SelfCrashCatcher {
         long seen = prefs.getLong(KEY_LAST_EXIT, 0);
         List<ApplicationExitInfo> exits = manager.getHistoricalProcessExitReasons(app.getPackageName(), 0, 5);
         if (exits == null || exits.isEmpty()) return;
-        if (!isEnabled(app)) {
+        if (!isEnabled(app) || !diedWhileBusy) {
             // Switched off: report nothing, but mark these exits as seen so they do not all appear when it is switched on again.
             long latest = seen;
             for (ApplicationExitInfo info : exits) latest = Math.max(latest, info.getTimestamp());
             prefs.edit().putLong(KEY_LAST_EXIT, latest).apply();
             return;
         }
+        diedWhileBusy = false;
         long newest = seen;
         StringBuilder text = new StringBuilder();
         for (ApplicationExitInfo info : exits) {
