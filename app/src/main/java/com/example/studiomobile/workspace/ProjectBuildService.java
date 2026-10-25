@@ -342,6 +342,7 @@ public final class ProjectBuildService {
         ScheduledFuture<?> oldTask = heartbeatTask;
         if (oldTask != null) oldTask.cancel(false);
         heartbeatTask = ticker.scheduleWithFixedDelay(this::beat, HEARTBEAT_EVERY_SECONDS, HEARTBEAT_EVERY_SECONDS, TimeUnit.SECONDS);
+        com.example.studiomobile.ActiveWork.begin();
         BuildForegroundService.start(appContext);   // keeps the build alive when the app is left; a failure here never blocks the build
         worker.execute(() -> run(project, bundle));
         return jobId;
@@ -481,6 +482,7 @@ public final class ProjectBuildService {
                 lock.notifyAll();
             }
             notifyState(finalState);
+            com.example.studiomobile.ActiveWork.end();
             // The copy of the project is only needed while building; removing it here keeps the app's cache from growing with every build.
             if (copiedProject != null) com.example.studiomobile.build.BuildCacheCleaner.deleteTree(copiedProject);
         }
