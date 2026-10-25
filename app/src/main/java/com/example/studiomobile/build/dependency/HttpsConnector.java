@@ -52,7 +52,10 @@ public final class HttpsConnector {
         private final Connection connection;
         private boolean closed;
 
-        Response(int status, Map<String, String> headers, Body body, Connection connection) { this.status = status; this.headers = headers; this.body = body; this.connection = connection; }
+        Response(int status, Map<String, String> headers, Body body, Connection connection) {
+            this.status = status; this.headers = headers; this.body = body; this.connection = connection;
+            com.example.studiomobile.ActiveWork.begin();
+        }
 
         public int status() { return status; }
         /** Header value (names are case-insensitive), or null. */
@@ -67,6 +70,7 @@ public final class HttpsConnector {
         @Override public void close() {
             if (closed) return;
             closed = true;
+            com.example.studiomobile.ActiveWork.end();
             if (body.complete && connection.reusable) release(connection); else connection.close();
         }
     }
