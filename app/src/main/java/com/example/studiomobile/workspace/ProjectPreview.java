@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
+import android.content.res.Configuration;
 import android.content.res.Resources;
 import com.example.studiomobile.build.BuildConfiguration;
 import com.example.studiomobile.build.BuildExecutableResolver;
@@ -65,6 +66,8 @@ public final class ProjectPreview {
         public PreviewBars bars = new PreviewBars();
         public String warning, error;
         public boolean landscape; public String orientationInfo;
+        /** The person picked a layout-land file: show it in landscape even when the Activity does not fix the orientation. */
+        public boolean forceLandscape;
         /** External page (https) that the project loads in its WebView, and whether the code lets media start without a tap. */
         public String startUrl; public boolean autoplay;
         /** Shared by every screen of the project; used to open the next Activity. */
@@ -117,10 +120,14 @@ public final class ProjectPreview {
 
         // ---- what to show
         String layoutName = null, page = null;
-        boolean openedHtml = false;
+        boolean openedHtml = false, pickedLand = false;
         if (openedFile != null && openedFile.isFile()) {
             String inRes = relativeTo(resDir, openedFile), inAssets = relativeTo(assets, openedFile);
-            if (inRes != null && inRes.startsWith("layout") && inRes.endsWith(".xml")) layoutName = stripExtension(openedFile.getName());
+            if (inRes != null && inRes.startsWith("layout") && inRes.endsWith(".xml")) {
+                layoutName = stripExtension(openedFile.getName());
+                int slash = inRes.indexOf('/');
+                pickedLand = slash > 0 && isLandDir(inRes.substring(0, slash));   // res/layout-land/x.xml
+            }
             else if (inAssets != null && (inAssets.endsWith(".html") || inAssets.endsWith(".htm"))) { page = inAssets; openedHtml = true; }
         }
         File launcher = null;
@@ -142,7 +149,7 @@ public final class ProjectPreview {
             return p;
         }
         boolean layoutMode = layoutName != null;
-        File layoutSource = layoutMode ? layoutFile(resDir, layoutName) : null;
+        File layoutSource = layoutMode ? layoutFile(resDir, layoutName, pickedLand) : null;
         boolean layoutHasWebView = layoutSource != null && read(layoutSource).contains("WebView");
         if (layoutMode && startPage == null && layoutHasWebView && externalUrl != null) startUrl = externalUrl;
         // Studio Mobile does not allow plain http, so such a page is explained instead of loaded.
@@ -203,6 +210,7 @@ public final class ProjectPreview {
         }
         p.session = session;
 
+        p.forceLandscape = pickedLand;
         applyScreen(p, session, activity, layoutMode ? layoutName : null, layoutMode);
         if (p.error != null) return p;
         if (p.landscape) p.modeLabel += " · Landscape";
@@ -256,6 +264,12 @@ public final class ProjectPreview {
     private static void applyScreen(Prepared p, Session s, File activity, String layoutName, boolean layoutMode) {
         String[] orientation = detectOrientation(s.manifest, activity);
         if (orientation != null) { p.landscape = orientation[0].equals("landscape"); p.orientationInfo = orientation[1]; }
+        if (p.forceLandscape) {
+            p.landscape = true;
+            if (p.orientationInfo == null || !orientation[0].equals("landscape")) p.orientationInfo = "Showing the layout-land version of this layout (landscape).";
+        }
+        // Resources follow the screen orientation, so a landscape screen picks res/layout-land (and values-land) like on a device.
+        applyOrientation(s.resources, p.landscape);
 
         // ---- theme: the Activity's own android:theme, else the application's
         Resources resources = s.resources; String[] packages = s.packages;
@@ -282,7 +296,7 @@ public final class ProjectPreview {
             List<String> names = new ArrayList<>();
             for (File source : s.sources) names.add(source.getName());
             Set<String> activities = PreviewLinks.simpleNames(names);
-            String layoutText = layoutMode ? read(layoutFile(s.resDir, layoutName)) : "";
+            String layoutText = layoutMode ? read(layoutFile(s.resDir, layoutName, p.landscape)) : "";
             String text = read(activity);
             p.links = PreviewLinks.scan(text, layoutText, activities);
             p.onClickActions = PreviewLinks.onClickActions(text, layoutText, activities);
@@ -741,6 +755,38 @@ public final class ProjectPreview {
         File[] variants = resDir.listFiles((dir, n) -> n.startsWith("layout"));
         if (variants != null) for (File variant : variants) { File candidate = new File(variant, name + ".xml"); if (candidate.isFile()) return candidate; }
         return null;
+    }
+
+    /** Like layoutFile, but a landscape screen looks in layout-land (and other qualifier folders with "land") first. */
+    private static File layoutFile(File resDir, String name, boolean landscape) {
+        if (landscape) {
+            File[] dirs = resDir.listFiles((dir, n) -> isLandDir(n));
+            if (dirs != null) {
+                Arrays.sort(dirs);
+                for (File dir : dirs) { File candidate = new File(dir, name + ".xml"); if (candidate.isFile()) return candidate; }
+            }
+        }
+        return layoutFile(resDir, name);
+    }
+
+    /** layout-land, layout-land-v21, layout-sw600dp-land, ... */
+    static boolean isLandDir(String folder) {
+        if (folder == null || !folder.startsWith("layout")) return false;
+        for (String part : folder.split("-")) if (part.equals("land")) return true;
+        return false;
+    }
+
+    /** Sets portrait or landscape on the project's own resources (never on the system ones, which are shared with the whole app). */
+    private static void applyOrientation(Resources resources, boolean landscape) {
+        if (resources == null || resources == Resources.getSystem()) return;
+        try {
+            Configuration config = new Configuration(resources.getConfiguration());
+            config.orientation = landscape ? Configuration.ORIENTATION_LANDSCAPE : Configuration.ORIENTATION_PORTRAIT;
+            if (config.screenWidthDp > 0 && config.screenHeightDp > 0 && (config.screenWidthDp > config.screenHeightDp) != landscape) {
+                int width = config.screenWidthDp; config.screenWidthDp = config.screenHeightDp; config.screenHeightDp = width;
+            }
+            resources.updateConfiguration(config, resources.getDisplayMetrics());
+        } catch (RuntimeException ignored) { /* keep the current configuration */ }
     }
 
     private static String defaultLayout(File resDir) {
