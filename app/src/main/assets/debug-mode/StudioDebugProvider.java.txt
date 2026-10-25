@@ -1,31 +1,50 @@
 package com.studiomobile.debugcatcher;
 
+import android.app.Activity;
+import android.app.ActivityManager;
+import android.app.Application;
+import android.app.ApplicationExitInfo;
 import android.content.ContentProvider;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.os.Process;
+import android.os.SystemClock;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.InputStream;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * Injected by Studio Mobile when Debug Mode is on. Android creates a ContentProvider before
  * Application.onCreate() and before any Activity, so this runs ahead of the app's own code.
- * It installs a crash handler that saves the stack trace and opens the full-screen log page.
+ * It installs a crash handler that saves the stack trace and opens the full-screen log page, a freeze watchdog for a UI thread
+ * that stops answering while the app is on screen, and (Android 11+) a report of an earlier "not responding" kill.
  */
 public final class StudioDebugProvider extends ContentProvider {
 
     static final String LOG_FILE_NAME = "studio_debug_crash.log";
     static final String EXTRA_LOG = "studio_debug_log";
+    private static final String PREFS = "studio_debug_catcher";
+    private static final String KEY_LAST_ANR = "last_anr_timestamp";
+    private static final long FREEZE_MS = 5000;
+    private static final long PROCESS_PAUSE_MS = 3000;
+    private static volatile int startedActivities;
 
     @Override public boolean onCreate() {
         final Context context = getContext();
@@ -45,7 +64,151 @@ public final class StudioDebugProvider extends ContentProvider {
                 System.exit(10);
             }
         });
+        trackForeground(context);
+        startWatchdog(app);
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override public void run() { try { reportPreviousAnr(app); } catch (Throwable ignored) { } }
+        }, 2000);
         return true;
+    }
+
+    private static void trackForeground(Context context) {
+        Context base = context.getApplicationContext();
+        if (!(base instanceof Application)) return;
+        ((Application) base).registerActivityLifecycleCallbacks(new Application.ActivityLifecycleCallbacks() {
+            @Override public void onActivityStarted(Activity activity) { startedActivities++; }
+            @Override public void onActivityStopped(Activity activity) { if (startedActivities > 0) startedActivities--; }
+            @Override public void onActivityCreated(Activity activity, Bundle state) { }
+            @Override public void onActivityResumed(Activity activity) { }
+            @Override public void onActivityPaused(Activity activity) { }
+            @Override public void onActivitySaveInstanceState(Activity activity, Bundle state) { }
+            @Override public void onActivityDestroyed(Activity activity) { }
+        });
+    }
+
+    private static void startWatchdog(final Context app) {
+        final Handler main = new Handler(Looper.getMainLooper());
+        Thread watchdog = new Thread(new Runnable() {
+            @Override public void run() {
+                final long[] lastBeat = { SystemClock.uptimeMillis() };
+                boolean shown = false;
+                long lastDump = 0;
+                while (true) {
+                    main.post(new Runnable() { @Override public void run() { lastBeat[0] = SystemClock.uptimeMillis(); } });
+                    long sleepStart = SystemClock.uptimeMillis();
+                    try { Thread.sleep(1000); } catch (InterruptedException stop) { return; }
+                    long now = SystemClock.uptimeMillis();
+                    if (now - sleepStart > PROCESS_PAUSE_MS) { lastBeat[0] = now; shown = false; lastDump = 0; continue; }
+                    if (startedActivities <= 0) { lastBeat[0] = now; shown = false; lastDump = 0; continue; }
+                    long frozenFor = now - lastBeat[0];
+                    if (frozenFor < FREEZE_MS) { shown = false; lastDump = 0; continue; }
+                    if (now - lastDump < 3000) continue;
+                    lastDump = now;
+                    try {
+                        String report = buildFreezeReport(app, frozenFor);
+                        writeLog(app, report);
+                        if (!shown) { shown = true; showPage(app, report); }
+                    } catch (Throwable ignored) { }
+                }
+            }
+        }, "studio-debug-freeze-watchdog");
+        watchdog.setDaemon(true);
+        watchdog.start();
+    }
+
+    private static String buildFreezeReport(Context app, long frozenFor) {
+        StringBuilder text = new StringBuilder();
+        text.append("=== APP FROZE (UI thread not responding) ===\n");
+        text.append("Time: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())).append('\n');
+        text.append("Package: ").append(app.getPackageName()).append('\n');
+        text.append("UI thread frozen for: ").append(frozenFor / 1000).append(" s (log refreshed while it lasts)\n");
+        text.append("Device: ").append(Build.MANUFACTURER).append(' ').append(Build.MODEL)
+            .append(" (Android ").append(Build.VERSION.RELEASE).append(", API ").append(Build.VERSION.SDK_INT).append(")\n");
+        text.append(memoryInfo(app)).append('\n');
+        Thread mainThread = Looper.getMainLooper().getThread();
+        text.append("--- UI (main) thread stack: where it is stuck ---\n");
+        for (StackTraceElement frame : mainThread.getStackTrace()) text.append("    at ").append(frame).append('\n');
+        text.append("\n--- All other threads ---\n");
+        for (Map.Entry<Thread, StackTraceElement[]> entry : Thread.getAllStackTraces().entrySet()) {
+            Thread thread = entry.getKey();
+            if (thread == mainThread) continue;
+            StackTraceElement[] trace = entry.getValue();
+            if (trace.length == 0) continue;
+            text.append("Thread \"").append(thread.getName()).append("\" (").append(thread.getState()).append(")\n");
+            int limit = Math.min(trace.length, 25);
+            for (int i = 0; i < limit; i++) text.append("    at ").append(trace[i]).append('\n');
+            text.append('\n');
+            if (text.length() > 55000) { text.append("... (truncated)\n"); break; }
+        }
+        return text.toString();
+    }
+
+    private static void reportPreviousAnr(Context app) throws Exception {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
+        ActivityManager manager = (ActivityManager) app.getSystemService(Context.ACTIVITY_SERVICE);
+        if (manager == null) return;
+        SharedPreferences prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+        long seen = prefs.getLong(KEY_LAST_ANR, 0);
+        List<ApplicationExitInfo> exits = manager.getHistoricalProcessExitReasons(app.getPackageName(), 0, 5);
+        if (exits == null || exits.isEmpty()) return;
+        long newest = seen;
+        ApplicationExitInfo found = null;
+        for (ApplicationExitInfo info : exits) {
+            if (info.getTimestamp() <= seen) continue;
+            newest = Math.max(newest, info.getTimestamp());
+            if (info.getReason() == ApplicationExitInfo.REASON_ANR && found == null) found = info;
+        }
+        prefs.edit().putLong(KEY_LAST_ANR, newest).apply();
+        if (found == null) return;
+        StringBuilder text = new StringBuilder();
+        text.append("=== APP WAS NOT RESPONDING LAST TIME (ANR) ===\n");
+        text.append("Android ended the app because it stopped responding. This is a record of that earlier event.\n\n");
+        text.append("Process: ").append(found.getProcessName()).append('\n');
+        text.append("Time: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date(found.getTimestamp()))).append('\n');
+        text.append("Description: ").append(found.getDescription()).append('\n');
+        text.append("Memory (PSS/RSS KB): ").append(found.getPss()).append(" / ").append(found.getRss()).append('\n');
+        try {
+            InputStream trace = found.getTraceInputStream();
+            if (trace != null) {
+                try {
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    byte[] buffer = new byte[8192]; int count, total = 0;
+                    while ((count = trace.read(buffer)) != -1 && total < 40000) { out.write(buffer, 0, count); total += count; }
+                    text.append("\n--- System trace ---\n").append(out.toString("UTF-8")).append('\n');
+                } finally { trace.close(); }
+            }
+        } catch (Throwable ignored) { }
+        String report = text.toString();
+        writeLog(app, report);
+        showPage(app, report);
+    }
+
+    private static String memoryInfo(Context app) {
+        Runtime rt = Runtime.getRuntime();
+        StringBuilder text = new StringBuilder();
+        text.append("Heap: used ").append((rt.totalMemory() - rt.freeMemory()) >> 20).append(" MB, max ").append(rt.maxMemory() >> 20).append(" MB\n");
+        try {
+            ActivityManager manager = (ActivityManager) app.getSystemService(Context.ACTIVITY_SERVICE);
+            ActivityManager.MemoryInfo info = new ActivityManager.MemoryInfo();
+            manager.getMemoryInfo(info);
+            text.append("Device RAM: free ").append(info.availMem >> 20).append(" MB of ").append(info.totalMem >> 20)
+                .append(" MB, low-memory=").append(info.lowMemory).append('\n');
+        } catch (Throwable ignored) { }
+        return text.toString();
+    }
+
+    private static void writeLog(Context app, String report) {
+        try {
+            FileOutputStream out = new FileOutputStream(new File(app.getFilesDir(), LOG_FILE_NAME), false);
+            try { out.write(report.getBytes("UTF-8")); } finally { out.close(); }
+        } catch (Throwable ignored) { }
+    }
+
+    private static void showPage(Context app, String report) {
+        Intent intent = new Intent(app, StudioCrashActivity.class);
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        intent.putExtra(EXTRA_LOG, report.length() > 60000 ? report.substring(0, 60000) : report);
+        app.startActivity(intent);
     }
 
     private static void handleCrash(Context app, Thread thread, Throwable error) throws Exception {

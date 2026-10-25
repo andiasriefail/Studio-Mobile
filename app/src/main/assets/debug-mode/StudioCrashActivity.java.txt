@@ -39,14 +39,20 @@ public final class StudioCrashActivity extends Activity {
         root.setPadding(pad, pad * 2, pad, pad);
 
         TextView title = new TextView(this);
-        title.setText("The app crashed");
+        final boolean frozen = log.startsWith("=== APP FROZE");
+        final boolean anr = log.startsWith("=== APP WAS NOT RESPONDING");
+        title.setText(frozen ? "The app is not responding" : anr ? "The app was not responding" : "The app crashed");
         title.setTextColor(Color.parseColor("#B00020"));
         title.setTextSize(22);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         root.addView(title);
 
         TextView hint = new TextView(this);
-        hint.setText("Debug Mode caught this before it could close silently. Copy the log and send it to your AI assistant.");
+        hint.setText(frozen
+            ? "The screen of the app stopped answering. The log shows where it is stuck. The app may still be running behind this page: Close returns to it. Copy the log and send it to your AI assistant."
+            : anr
+            ? "Last time, Android ended the app because it stopped responding. This is a record of that earlier event. Copy the log and send it to your AI assistant."
+            : "Debug Mode caught this before it could close silently. Copy the log and send it to your AI assistant.");
         hint.setTextColor(Color.parseColor("#555555"));
         hint.setTextSize(14);
         hint.setPadding(0, pad / 2, 0, pad / 2);
@@ -108,7 +114,7 @@ public final class StudioCrashActivity extends Activity {
                 return out.toString("UTF-8");
             } finally { in.close(); }
         } catch (Exception error) {
-            return "No crash log found: " + error;
+            return "No log found: " + error;
         }
     }
 
