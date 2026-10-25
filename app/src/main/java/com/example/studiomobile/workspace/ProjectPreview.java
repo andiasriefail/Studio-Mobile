@@ -14,10 +14,13 @@ import com.example.studiomobile.build.BuildStageContext;
 import com.example.studiomobile.build.GradleBuildPipeline;
 import com.example.studiomobile.build.ManifestPackage;
 import com.example.studiomobile.build.process.BuildProcessRunner;
+import com.example.studiomobile.build.dependency.DownloadMemoryPolicy;
+import com.example.studiomobile.build.dependency.MavenResolver;
 import com.example.studiomobile.build.stages.DependencyResolutionStage;
 import com.example.studiomobile.build.stages.ResourceCompilationStage;
 import com.example.studiomobile.build.stages.ResourceLinkingStage;
 import java.io.File;
+import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -27,6 +30,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.HashSet;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -45,6 +49,12 @@ public final class ProjectPreview {
     private ProjectPreview() { }
 
     public enum Mode { LAYOUT, WEB, NONE }
+
+    public interface Progress { void status(String text); boolean cancelled(); }
+
+    public static final class Cancelled extends RuntimeException { public Cancelled() { super("Preview was cancelled."); } }
+
+    private static final class NotCached extends IOException { NotCached(String url) { super("Not bundled: " + url); } }
 
     /** Everything the UI thread needs to draw one screen of the preview. */
     public static final class Prepared {
@@ -95,7 +105,9 @@ public final class ProjectPreview {
     private static final Pattern FETCH_USE = Pattern.compile("\\bfetch\\s*\\(|XMLHttpRequest");
     private static final Pattern LOAD_ASSET = Pattern.compile("loadUrl\\s*\\(\\s*\"file:///android_asset/([^\"?#]+)");
 
-    public static Prepared prepare(Context context, File project, File openedFile) {
+    public static Prepared prepare(Context context, File project, File openedFile) { return prepare(context, project, openedFile, null); }
+
+    public static Prepared prepare(Context context, File project, File openedFile, Progress progress) {
         Prepared p = new Prepared();
         File main = BuildProjectFiles.mainDirectory(project);
         File assets = new File(main, "assets"), resDir = new File(main, "res");
@@ -163,11 +175,12 @@ public final class ProjectPreview {
         Resources resources = null; String buildProblem = null;
         if (layoutMode || resDir.isDirectory()) {
             try {
-                File apk = buildResources(context, project);
+                File apk = buildResources(context, project, progress);
                 String[] foundPackage = new String[1];
                 resources = loadResources(context, apk, foundPackage);
                 packages = candidatePackages(project, foundPackage[0]);
-            } catch (Exception failure) { buildProblem = String.valueOf(failure.getMessage() == null ? failure : failure.getMessage()); }
+            } catch (Cancelled cancelled) { p.error = cancelled.getMessage(); return p; }
+            catch (Exception failure) { buildProblem = String.valueOf(failure.getMessage() == null ? failure : failure.getMessage()); }
         }
         if (resources == null && layoutMode) { p.error = "The layout could not be prepared.\n\n" + buildProblem; return p; }
         if (resources == null) {
@@ -311,7 +324,7 @@ public final class ProjectPreview {
 
     // ------------------------------------------------------------------ AAPT2
 
-    private static File buildResources(Context context, File project) throws Exception {
+    private static File buildResources(Context context, File project, Progress progress) throws Exception {
         File cache = context.getCacheDir();
         File[] old = cache.listFiles((dir, name) -> name.startsWith("preview-"));
         File work = new File(cache, "preview-" + System.currentTimeMillis());
@@ -330,17 +343,82 @@ public final class ProjectPreview {
         BuildStageContext stageContext = new BuildStageContext(configuration, work);
         BuildProcessRunner runner = new BuildProcessRunner();
         try {
-            // Libraries only contribute resources (themes and styles that the project extends); a failure here is not fatal.
-            try { new DependencyResolutionStage(StudioStorage.localLibsDir(context)).execute(stageContext, logger); }
-            catch (Exception libraries) { log.append("Libraries were not resolved: ").append(libraries.getMessage()).append('\n'); }
-            new ResourceCompilationStage(tools, runner).execute(stageContext, logger);
+            if (progress != null) progress.status("Preparing libraries...");
+            resolveLibraries(context, stageContext, logger, log, progress);
+            if (progress != null) progress.status("Compiling resources...");
+            new ResourceCompilationStage(tools, runner, new File(context.getFilesDir(), "preview-compiled")).execute(stageContext, logger);
+            if (progress != null) progress.status("Linking resources...");
             new ResourceLinkingStage(tools, runner).execute(stageContext, logger);
+        } catch (Cancelled cancelled) {
+            throw cancelled;
         } catch (Exception failure) {
             throw new IllegalStateException(failure.getMessage() + "\n\n" + lastLines(log.toString(), 14), failure);
         }
         File apk = stageContext.getOutput("resourceApk");
         if (apk == null || !apk.isFile()) throw new IllegalStateException("AAPT2 produced no resources.\n\n" + lastLines(log.toString(), 14));
         return apk;
+    }
+
+    private static void resolveLibraries(Context context, BuildStageContext stageContext, BuildLogger logger, StringBuilder log, Progress progress) {
+        File cache = StudioStorage.localLibsDir(context);
+        long started = System.currentTimeMillis();
+        try {
+            new DependencyResolutionStage(cache, new OfflineFetcher()).execute(stageContext, logger);
+            return;
+        } catch (Exception offline) {
+            if (!causedBy(offline, NotCached.class)) { log.append("Libraries were not resolved: ").append(offline.getMessage()).append('\n'); return; }
+        } finally {
+            dropFreshMarkers(cache, started - 1000);
+        }
+        if (progress != null) progress.status("These libraries are not bundled in Studio Mobile. Downloading them once...");
+        try {
+            new DependencyResolutionStage(cache, new ProgressFetcher(new MavenResolver.HttpsFetcher(), progress)).execute(stageContext, logger);
+        } catch (Cancelled cancelled) {
+            throw cancelled;
+        } catch (Exception online) {
+            if (causedBy(online, Cancelled.class)) throw new Cancelled();
+            log.append("Libraries were not resolved: ").append(online.getMessage()).append('\n');
+        }
+    }
+
+    private static boolean causedBy(Throwable failure, Class<? extends Throwable> type) {
+        for (Throwable t = failure; t != null; t = t.getCause()) if (type.isInstance(t)) return true;
+        return false;
+    }
+
+    private static void dropFreshMarkers(File directory, long since) {
+        File[] children = directory.listFiles();
+        if (children == null) return;
+        for (File child : children) {
+            if (child.isDirectory()) dropFreshMarkers(child, since);
+            else if (child.getName().endsWith(".missing") && child.lastModified() >= since) child.delete();
+        }
+    }
+
+    private static final class OfflineFetcher implements MavenResolver.Fetcher {
+        private final Set<String> jarMisses = new HashSet<>();
+
+        @Override public byte[] get(String url, long maxBytes) throws IOException {
+            if (url.endsWith(".module") || url.endsWith(".sha1")) return null;
+            if (url.endsWith(".jar")) { jarMisses.add(url.substring(0, url.length() - 4)); return null; }
+            if (url.endsWith(".aar") && jarMisses.contains(url.substring(0, url.length() - 4))) return null;
+            throw new NotCached(url);
+        }
+    }
+
+    private static final class ProgressFetcher implements MavenResolver.Fetcher {
+        private final MavenResolver.Fetcher inner; private final Progress progress; private int count;
+
+        ProgressFetcher(MavenResolver.Fetcher inner, Progress progress) { this.inner = inner; this.progress = progress; }
+
+        private void announce(String url) {
+            if (Thread.currentThread().isInterrupted() || (progress != null && progress.cancelled())) throw new Cancelled();
+            if (progress != null && !url.endsWith(".sha1")) progress.status("Downloading libraries (" + (++count) + ")\n" + url.substring(url.lastIndexOf('/') + 1));
+        }
+
+        @Override public byte[] get(String url, long maxBytes) throws IOException { announce(url); return inner.get(url, maxBytes); }
+
+        @Override public String download(String url, File target, long maxBytes, DownloadMemoryPolicy policy) throws IOException { announce(url); return inner.download(url, target, maxBytes, policy); }
     }
 
     /** resources.ap_ as Resources. The package manager route is the supported one; the AssetManager route is the fallback. */
