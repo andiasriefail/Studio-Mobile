@@ -60,6 +60,8 @@ public final class LanguageUi {
 
     // Build
     public static final String BUILD_BUSY = "A build is already running";
+    /** The [step] text the Gradle route writes when it launches the Java runtime; the Build log moves to "Starting the build…" on it. */
+    public static final String BUILD_ENGINE_START = "Starting Java runtime";
     public static final String CONNECTION_TIMEOUT_TITLE = "Connection Timeout";
     public static final String RETRY = "Retry";
     public static final String RETRY_EXPIRED = "The retry time ran out. Start the build again.";
