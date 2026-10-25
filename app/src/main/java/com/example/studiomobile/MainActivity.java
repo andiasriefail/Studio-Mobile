@@ -22,10 +22,12 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.ArrayAdapter;
 import android.widget.FrameLayout;
 import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ListPopupWindow;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -308,7 +310,9 @@ public class MainActivity extends AppCompatActivity {
         wallpaperUi.releaseVideo();   // the live wallpaper only plays in the code editor: Home, Preview, Build, ... always stop it
         if (screen == Screen.PREVIEW && screenView != null) PreviewRenderer.release(screenView);
         previewPhone = null;
-        if (next != Screen.PREVIEW) previewAbort.abort();
+        if (layoutPopup != null) { layoutPopup.dismiss(); layoutPopup = null; }
+        if (next != Screen.PREVIEW) { previewAbort.abort(); previewLayoutShown = null; }
+        if (next == Screen.PREVIEW) previewLayouts = new ArrayList<>();
         screen = next;
         if (next != Screen.BUILD) getWindow().clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);   // only the build page keeps the screen on
         // The keystore page shows passwords: no screenshots and no screen recording there.
@@ -1506,13 +1510,18 @@ public class MainActivity extends AppCompatActivity {
      * Layout XML is built with AAPT2 only (no Java, DEX or signing) and inflated with the project's own resources;
      * assets HTML is shown in a real WebView. Project Java code is not run.
      */
-    private void showPreview() {
+    private void showPreview() { showPreview(openedFile); }
+
+    /** [target] is the file to preview: the open editor file, or the layout picked in the dropdown (kept when the refresh button is pressed). */
+    private void showPreview(File target) {
         if (currentProject == null) { showHome(); return; }
         saveCurrent(false);
-        previewOpened = openedFile;
+        previewOpened = target;
         show(Screen.PREVIEW, R.layout.screen_preview, false, R.color.night_bg);
         click(R.id.preview_back, this::goBack);
-        click(R.id.preview_refresh, this::showPreview);
+        click(R.id.preview_refresh, () -> showPreview(previewOpened));
+        click(R.id.layout_picker, this::openLayoutPicker);
+        refreshLayoutPicker(null);
         click(R.id.preview_cancel, this::cancelPreviewLoad);
         click(R.id.preview_tip, () -> screenView.findViewById(R.id.preview_tip).setVisibility(View.GONE));
         loadPreview();
@@ -1541,7 +1550,10 @@ public class MainActivity extends AppCompatActivity {
         final AbortController.Signal signal = previewAbort.renew();
         if (screenView != null && screen == Screen.PREVIEW) {
             screenView.findViewById(R.id.preview_message).setVisibility(View.GONE);
-            if (previewPhone == null) screenView.findViewById(R.id.preview_loading).setVisibility(View.VISIBLE);
+            if (previewPhone == null) {
+                screenView.findViewById(R.id.preview_loading_box).setVisibility(View.VISIBLE);
+                screenView.findViewById(R.id.preview_loading).setVisibility(View.VISIBLE);
+            }
         }
         final ProjectPreview.Progress progress = new ProjectPreview.Progress() {
             @Override public void status(String text) { setPreviewStatus(token, text); }
@@ -1568,11 +1580,14 @@ public class MainActivity extends AppCompatActivity {
             TextView status = screenView.findViewById(R.id.preview_status);
             View cancel = screenView.findViewById(R.id.preview_cancel);
             if (status == null || cancel == null) return;
+            screenView.findViewById(R.id.preview_loading_box).setVisibility(View.VISIBLE);
             status.setText(text); status.setVisibility(View.VISIBLE); cancel.setVisibility(View.VISIBLE);
         });
     }
 
     private void hidePreviewProgress() {
+        // The whole box goes away, not only its children: the empty box (dark rounded background + shadow) used to stay in the middle of the stage.
+        screenView.findViewById(R.id.preview_loading_box).setVisibility(View.GONE);
         screenView.findViewById(R.id.preview_loading).setVisibility(View.GONE);
         screenView.findViewById(R.id.preview_status).setVisibility(View.GONE);
         screenView.findViewById(R.id.preview_cancel).setVisibility(View.GONE);
@@ -1609,12 +1624,96 @@ public class MainActivity extends AppCompatActivity {
         screenView.findViewById(R.id.preview_tip).setVisibility(View.GONE);
         ((TextView) screenView.findViewById(R.id.preview_title)).setText(prepared.title);
         ((TextView) screenView.findViewById(R.id.preview_mode)).setText(prepared.modeLabel);
+        refreshLayoutPicker(prepared.title);
         PreviewRenderer.PhoneView phone = PreviewRenderer.render(this, prepared, this::showPreviewTip);
         if (old != null) { stage.removeView(old); PreviewRenderer.release(old); }   // swap only once the new one is ready: no blank flash
         previewPhone = phone;
         stage.addView(phone, 0, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER));
         if (prepared.warning != null) showPreviewTip(prepared.warning);
         else if (prepared.landscape && prepared.orientationInfo != null) showPreviewTip(prepared.orientationInfo);
+    }
+
+    // ---- layout picker: a dropdown above the preview header to view the project's layout XML files one by one
+
+    private List<File> previewLayouts = new ArrayList<>();
+    private String previewLayoutShown;   // file name currently shown by the preview, e.g. "activity_main.xml"
+    private ListPopupWindow layoutPopup;
+
+    /** Every layout XML in res/layout and res/layout-* (one entry per file name, res/layout first). Plain directory listing, cheap. */
+    private static List<File> listLayoutFiles(File project) {
+        java.util.Map<String, File> byName = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        File res = new File(BuildProjectFiles.mainDirectory(project), "res");
+        File[] dirs = res.listFiles((dir, name) -> name.equals("layout") || name.startsWith("layout-"));
+        if (dirs == null) return new ArrayList<>();
+        Arrays.sort(dirs, (a, b) -> a.getName().compareTo(b.getName()));   // "layout" sorts before "layout-land", so it wins
+        for (File dir : dirs) {
+            File[] files = dir.listFiles((d, name) -> name.endsWith(".xml"));
+            if (files == null) continue;
+            for (File file : files) if (file.isFile() && !byName.containsKey(file.getName())) byName.put(file.getName(), file);
+        }
+        return new ArrayList<>(byName.values());
+    }
+
+    /** Re-reads the layout list and shows [shown] (the preview's current file name) in the dropdown. [shown] null keeps the last one. */
+    private void refreshLayoutPicker(String shown) {
+        if (shown != null) previewLayoutShown = shown;
+        final File project = currentProject;
+        if (project == null || screenView == null) return;
+        TextView text = screenView.findViewById(R.id.layout_picker_text);
+        if (text != null) text.setText(previewLayoutShown != null ? previewLayoutShown : (previewOpened != null ? previewOpened.getName() : ""));
+        liveExecutor.execute(() -> {
+            final List<File> found = listLayoutFiles(project);
+            runOnUiThread(() -> {
+                if (screen != Screen.PREVIEW || screenView == null || project != currentProject) return;
+                previewLayouts = found;
+                View row = screenView.findViewById(R.id.layout_picker_row);
+                if (row != null) row.setVisibility(found.isEmpty() ? View.GONE : View.VISIBLE);   // nothing to pick in an HTML-only project
+            });
+        });
+    }
+
+    private void openLayoutPicker() {
+        if (screen != Screen.PREVIEW || screenView == null || previewLayouts.isEmpty()) return;
+        if (layoutPopup != null) { layoutPopup.dismiss(); layoutPopup = null; }
+        final View anchor = screenView.findViewById(R.id.layout_picker);
+        final List<File> files = new ArrayList<>(previewLayouts);
+        final ListPopupWindow popup = new ListPopupWindow(this);
+        popup.setAnchorView(anchor);
+        popup.setModal(true);
+        popup.setWidth(anchor.getWidth());
+        popup.setVerticalOffset(dp(4));
+        android.graphics.drawable.GradientDrawable background = new android.graphics.drawable.GradientDrawable();
+        background.setColor(color(R.color.night_tab)); background.setCornerRadius(dp(12));
+        background.setStroke(dp(1), color(R.color.night_muted));
+        popup.setBackgroundDrawable(background);
+        popup.setAdapter(new ArrayAdapter<File>(this, 0, files) {
+            @Override public View getView(int position, View convert, ViewGroup parent) {
+                TextView row = convert instanceof TextView ? (TextView) convert : new TextView(MainActivity.this);
+                String name = getItem(position).getName();
+                boolean current = name.equals(previewLayoutShown);
+                row.setText(name);
+                row.setSingleLine(true); row.setEllipsize(android.text.TextUtils.TruncateAt.END);
+                row.setTextSize(14);
+                row.setTextColor(color(current ? R.color.cosmic_pink : R.color.night_text));
+                row.setTypeface(android.graphics.Typeface.create(current ? "sans-serif-medium" : "sans-serif", android.graphics.Typeface.NORMAL));
+                row.setGravity(Gravity.CENTER_VERTICAL);
+                row.setMinHeight(dp(44));
+                row.setPadding(dp(14), dp(8), dp(14), dp(8));
+                return row;
+            }
+        });
+        popup.setOnItemClickListener((parent, view, position, id) -> {
+            popup.dismiss();
+            File picked = files.get(position);
+            if (picked.getName().equals(previewLayoutShown) && previewPhone != null) return;   // already showing it
+            previewOpened = picked;
+            previewLayoutShown = picked.getName();
+            ((TextView) screenView.findViewById(R.id.layout_picker_text)).setText(previewLayoutShown);
+            loadPreview();
+        });
+        popup.setOnDismissListener(() -> { if (layoutPopup == popup) layoutPopup = null; });
+        layoutPopup = popup;
+        popup.show();
     }
 
     /** Tapping a bar in the preview explains where its value comes from. */
