@@ -1511,6 +1511,7 @@ public class MainActivity extends AppCompatActivity {
         show(Screen.PREVIEW, R.layout.screen_preview, false, R.color.night_bg);
         click(R.id.preview_back, this::goBack);
         click(R.id.preview_refresh, this::showPreview);
+        click(R.id.preview_cancel, this::cancelPreviewLoad);
         click(R.id.preview_tip, () -> screenView.findViewById(R.id.preview_tip).setVisibility(View.GONE));
         loadPreview();
     }
@@ -1523,11 +1524,20 @@ public class MainActivity extends AppCompatActivity {
         final File project = currentProject, opened = previewOpened;
         final int token = ++previewToken;
         final AbortController.Signal signal = previewAbort.renew();
+        if (screenView != null && screen == Screen.PREVIEW) {
+            screenView.findViewById(R.id.preview_message).setVisibility(View.GONE);
+            if (previewPhone == null) screenView.findViewById(R.id.preview_loading).setVisibility(View.VISIBLE);
+        }
+        final ProjectPreview.Progress progress = new ProjectPreview.Progress() {
+            @Override public void status(String text) { setPreviewStatus(token, text); }
+            @Override public boolean cancelled() { return signal.isAborted(); }
+        };
         signal.attach(previewExecutor.submit(() -> {
             if (signal.isAborted()) return;
+            setPreviewStatus(token, "Preparing preview...");
             com.example.studiomobile.build.LocalLibsInstaller.install(this);
             ProjectPreview.Prepared prepared;
-            try { prepared = ProjectPreview.prepare(this, project, opened); }
+            try { prepared = ProjectPreview.prepare(this, project, opened, progress); }
             catch (Throwable failure) { prepared = new ProjectPreview.Prepared(); prepared.error = "Preview failed: " + failure; }
             if (signal.isAborted()) return;
             final ProjectPreview.Prepared result = prepared;
@@ -1535,9 +1545,37 @@ public class MainActivity extends AppCompatActivity {
         }));
     }
 
+    private void setPreviewStatus(int token, String text) {
+        runOnUiThread(() -> {
+            if (token != previewToken || screen != Screen.PREVIEW || screenView == null) return;
+            TextView status = screenView.findViewById(R.id.preview_status);
+            View cancel = screenView.findViewById(R.id.preview_cancel);
+            if (status == null || cancel == null) return;
+            status.setText(text); status.setVisibility(View.VISIBLE); cancel.setVisibility(View.VISIBLE);
+        });
+    }
+
+    private void hidePreviewProgress() {
+        screenView.findViewById(R.id.preview_loading).setVisibility(View.GONE);
+        screenView.findViewById(R.id.preview_status).setVisibility(View.GONE);
+        screenView.findViewById(R.id.preview_cancel).setVisibility(View.GONE);
+    }
+
+    private void cancelPreviewLoad() {
+        if (screen != Screen.PREVIEW || screenView == null) return;
+        previewToken++;
+        previewAbort.abort();
+        hidePreviewProgress();
+        if (previewPhone == null) {
+            TextView message = screenView.findViewById(R.id.preview_message);
+            message.setText("Preview was cancelled. Press the preview button to load it again.");
+            message.setVisibility(View.VISIBLE);
+        } else showPreviewTip("Preview update was cancelled.");
+    }
+
     private void renderPreview(ProjectPreview.Prepared prepared) {
         FrameLayout stage = screenView.findViewById(R.id.preview_stage);
-        screenView.findViewById(R.id.preview_loading).setVisibility(View.GONE);
+        hidePreviewProgress();
         TextView message = screenView.findViewById(R.id.preview_message);
         PreviewRenderer.PhoneView old = previewPhone;   // set when this is a live refresh of a preview that is already showing
         if (prepared.error != null) {
