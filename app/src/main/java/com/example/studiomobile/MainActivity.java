@@ -1635,34 +1635,66 @@ public class MainActivity extends AppCompatActivity {
 
     // ---- layout picker: a dropdown above the preview header to view the project's layout XML files one by one
 
-    private List<File> previewLayouts = new ArrayList<>();
-    private String previewLayoutShown;   // file name currently shown by the preview, e.g. "activity_main.xml"
-    private ListPopupWindow layoutPopup;
+    /** One line of the dropdown: a layout file, and whether it is the layout-land (landscape) version of it. */
+    private static final class LayoutOption {
+        final File file; final String label; final boolean land;
+        LayoutOption(File file, String label, boolean land) { this.file = file; this.label = label; this.land = land; }
+    }
 
-    /** Every layout XML in res/layout and res/layout-* (one entry per file name, res/layout first). Plain directory listing, cheap. */
-    private static List<File> listLayoutFiles(File project) {
-        java.util.Map<String, File> byName = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+    private List<LayoutOption> previewLayouts = new ArrayList<>();
+    private String previewLayoutShown;   // dropdown text of the layout the preview shows, e.g. "activity_main.xml" or "activity_main.xml (landscape)"
+    private ListPopupWindow layoutPopup;
+    private static final String LAND_SUFFIX = " (landscape)";
+
+    private static boolean isLandFolder(String folder) {
+        if (folder == null || !folder.startsWith("layout")) return false;
+        for (String part : folder.split("-")) if (part.equals("land")) return true;
+        return false;
+    }
+
+    private static boolean isLandFile(File file) { return file != null && file.getParentFile() != null && isLandFolder(file.getParentFile().getName()); }
+
+    /**
+     * Layout XML files of res/layout and res/layout-*. Every name appears once; a name that also exists in layout-land (or another
+     * folder with "land" in it) gets a second line, "(landscape)", but only when the project really has that file.
+     */
+    private static List<LayoutOption> listLayoutFiles(File project) {
+        java.util.Map<String, File> normal = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER), land = new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         File res = new File(BuildProjectFiles.mainDirectory(project), "res");
         File[] dirs = res.listFiles((dir, name) -> name.equals("layout") || name.startsWith("layout-"));
-        if (dirs == null) return new ArrayList<>();
-        Arrays.sort(dirs, (a, b) -> a.getName().compareTo(b.getName()));   // "layout" sorts before "layout-land", so it wins
+        List<LayoutOption> result = new ArrayList<>();
+        if (dirs == null) return result;
+        Arrays.sort(dirs, (x, y) -> x.getName().compareTo(y.getName()));   // "layout" sorts before "layout-land", so it wins
         for (File dir : dirs) {
             File[] files = dir.listFiles((d, name) -> name.endsWith(".xml"));
             if (files == null) continue;
-            for (File file : files) if (file.isFile() && !byName.containsKey(file.getName())) byName.put(file.getName(), file);
+            java.util.Map<String, File> target = isLandFolder(dir.getName()) ? land : normal;
+            for (File file : files) if (file.isFile() && !target.containsKey(file.getName())) target.put(file.getName(), file);
         }
-        return new ArrayList<>(byName.values());
+        java.util.Set<String> names = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        names.addAll(normal.keySet()); names.addAll(land.keySet());
+        for (String name : names) {
+            File n = normal.get(name), l = land.get(name);
+            if (n != null) result.add(new LayoutOption(n, name, false));
+            if (l != null) result.add(new LayoutOption(l, name + LAND_SUFFIX, true));
+        }
+        return result;
+    }
+
+    /** The dropdown text for the preview's current file name: the landscape marker is added when the opened file is in layout-land. */
+    private String layoutLabel(String fileName) {
+        return fileName == null ? "" : fileName + (isLandFile(previewOpened) ? LAND_SUFFIX : "");
     }
 
     /** Re-reads the layout list and shows [shown] (the preview's current file name) in the dropdown. [shown] null keeps the last one. */
     private void refreshLayoutPicker(String shown) {
-        if (shown != null) previewLayoutShown = shown;
+        if (shown != null) previewLayoutShown = layoutLabel(shown);
         final File project = currentProject;
         if (project == null || screenView == null) return;
         TextView text = screenView.findViewById(R.id.layout_picker_text);
-        if (text != null) text.setText(previewLayoutShown != null ? previewLayoutShown : (previewOpened != null ? previewOpened.getName() : ""));
+        if (text != null) text.setText(previewLayoutShown != null ? previewLayoutShown : (previewOpened != null ? layoutLabel(previewOpened.getName()) : ""));
         liveExecutor.execute(() -> {
-            final List<File> found = listLayoutFiles(project);
+            final List<LayoutOption> found = listLayoutFiles(project);
             runOnUiThread(() -> {
                 if (screen != Screen.PREVIEW || screenView == null || project != currentProject) return;
                 previewLayouts = found;
@@ -1676,7 +1708,7 @@ public class MainActivity extends AppCompatActivity {
         if (screen != Screen.PREVIEW || screenView == null || previewLayouts.isEmpty()) return;
         if (layoutPopup != null) { layoutPopup.dismiss(); layoutPopup = null; }
         final View anchor = screenView.findViewById(R.id.layout_picker);
-        final List<File> files = new ArrayList<>(previewLayouts);
+        final List<LayoutOption> options = new ArrayList<>(previewLayouts);
         final ListPopupWindow popup = new ListPopupWindow(this);
         popup.setAnchorView(anchor);
         popup.setModal(true);
@@ -1686,12 +1718,12 @@ public class MainActivity extends AppCompatActivity {
         background.setColor(color(R.color.night_tab)); background.setCornerRadius(dp(12));
         background.setStroke(dp(1), color(R.color.night_muted));
         popup.setBackgroundDrawable(background);
-        popup.setAdapter(new ArrayAdapter<File>(this, 0, files) {
+        popup.setAdapter(new ArrayAdapter<LayoutOption>(this, 0, options) {
             @Override public View getView(int position, View convert, ViewGroup parent) {
                 TextView row = convert instanceof TextView ? (TextView) convert : new TextView(MainActivity.this);
-                String name = getItem(position).getName();
-                boolean current = name.equals(previewLayoutShown);
-                row.setText(name);
+                LayoutOption option = getItem(position);
+                boolean current = option.label.equals(previewLayoutShown);
+                row.setText(option.label);
                 row.setSingleLine(true); row.setEllipsize(android.text.TextUtils.TruncateAt.END);
                 row.setTextSize(14);
                 row.setTextColor(color(current ? R.color.cosmic_pink : R.color.night_text));
@@ -1704,10 +1736,10 @@ public class MainActivity extends AppCompatActivity {
         });
         popup.setOnItemClickListener((parent, view, position, id) -> {
             popup.dismiss();
-            File picked = files.get(position);
-            if (picked.getName().equals(previewLayoutShown) && previewPhone != null) return;   // already showing it
-            previewOpened = picked;
-            previewLayoutShown = picked.getName();
+            LayoutOption picked = options.get(position);
+            if (picked.label.equals(previewLayoutShown) && previewPhone != null) return;   // already showing it
+            previewOpened = picked.file;
+            previewLayoutShown = picked.label;
             ((TextView) screenView.findViewById(R.id.layout_picker_text)).setText(previewLayoutShown);
             loadPreview();
         });
