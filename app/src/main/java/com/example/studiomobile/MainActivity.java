@@ -158,6 +158,8 @@ public class MainActivity extends AppCompatActivity {
     // Preview
     private int previewToken;
     private File previewOpened;
+    private String previewFingerprint;
+    private volatile String previewPendingFingerprint;
     private final AbortController previewAbort = new AbortController();
     private final ExecutorService previewExecutor = Executors.newSingleThreadExecutor();
 
@@ -1443,7 +1445,7 @@ public class MainActivity extends AppCompatActivity {
         if (currentProject == null || screenView == null) return;
         if (leaveIfProjectGone()) return;
         if (screen == Screen.EDITOR) syncEditor(structure);
-        else if (screen == Screen.PREVIEW) loadPreview();
+        else if (screen == Screen.PREVIEW) loadPreviewIfChanged();
     }
 
     private void syncEditor(boolean structure) {
@@ -1520,6 +1522,19 @@ public class MainActivity extends AppCompatActivity {
      * Builds the preview from what is on disk now. Each call aborts the one before it, so rapid changes from MCP never pile up
      * and an outdated result is never drawn over a newer one.
      */
+    private void loadPreviewIfChanged() {
+        final File project = currentProject, opened = previewOpened;
+        final int token = previewToken;
+        previewExecutor.execute(() -> {
+            final String now = ProjectPreview.fingerprint(project, opened);
+            runOnUiThread(() -> {
+                if (token != previewToken || screen != Screen.PREVIEW || screenView == null) return;
+                if (now.equals(previewFingerprint)) return;
+                loadPreview();
+            });
+        });
+    }
+
     private void loadPreview() {
         final File project = currentProject, opened = previewOpened;
         final int token = ++previewToken;
@@ -1534,6 +1549,8 @@ public class MainActivity extends AppCompatActivity {
         };
         signal.attach(previewExecutor.submit(() -> {
             if (signal.isAborted()) return;
+            final String fingerprint = ProjectPreview.fingerprint(project, opened);
+            previewPendingFingerprint = fingerprint;
             setPreviewStatus(token, "Preparing preview...");
             com.example.studiomobile.build.LocalLibsInstaller.install(this);
             ProjectPreview.Prepared prepared;
@@ -1541,7 +1558,7 @@ public class MainActivity extends AppCompatActivity {
             catch (Throwable failure) { prepared = new ProjectPreview.Prepared(); prepared.error = "Preview failed: " + failure; }
             if (signal.isAborted()) return;
             final ProjectPreview.Prepared result = prepared;
-            runOnUiThread(() -> { if (!signal.isAborted() && screen == Screen.PREVIEW && token == previewToken) renderPreview(result); });
+            runOnUiThread(() -> { if (!signal.isAborted() && screen == Screen.PREVIEW && token == previewToken) { previewFingerprint = fingerprint; renderPreview(result); } });
         }));
     }
 
@@ -1565,6 +1582,7 @@ public class MainActivity extends AppCompatActivity {
         if (screen != Screen.PREVIEW || screenView == null) return;
         previewToken++;
         previewAbort.abort();
+        previewFingerprint = previewPendingFingerprint;
         hidePreviewProgress();
         if (previewPhone == null) {
             TextView message = screenView.findViewById(R.id.preview_message);
