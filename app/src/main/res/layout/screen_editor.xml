@@ -17,7 +17,7 @@
                 <ImageView android:layout_width="18dp" android:layout_height="18dp" android:src="@drawable/ic_preview"
                     android:tint="@color/cosmic_primary_dark" android:contentDescription="@null" />
                 <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:layout_marginStart="6dp"
-                    android:text="@string/preview" android:textColor="@color/cosmic_primary_dark" android:textSize="14sp" android:fontFamily="sans-serif-medium" />
+                    android:text="@string/preview_layout" android:singleLine="true" android:textColor="@color/cosmic_primary_dark" android:textSize="14sp" android:fontFamily="sans-serif-medium" />
             </LinearLayout>
             <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
             <ImageView android:id="@+id/editor_wrap" android:layout_width="36dp" android:layout_height="36dp" android:padding="8dp"
