@@ -31,6 +31,8 @@ An Android IDE that runs **directly on your phone**: write code, build APK/AAB, 
     - [XML layout preview](#xml-layout-preview)
     - [WebView preview](#webview-preview)
     - [Preview follows changes](#preview-follows-changes)
+    - [Why the preview can differ from the app](#why-the-preview-can-differ-from-the-app)
+    - [Libraries in the preview](#libraries-in-the-preview)
 10. [Dependencies, Repository URL, and JitPack](#dependencies-repository-url-and-jitpack)
     - [Example: JitPack (Groovy)](#example-jitpack-groovy)
     - [Example: JitPack (Kotlin DSL)](#example-jitpack-kotlin-dsl)
@@ -82,6 +84,7 @@ An Android IDE that runs **directly on your phone**: write code, build APK/AAB, 
 | Build an APK on the phone | [Two build engines](#two-build-engines) |
 | Build failed, looking for the cause | [Pre-build checks](#pre-build-checks-local-build), [Build Error Logs](#ide-features) |
 | Choose a Java, Gradle, or AGP version | [Java and JDK](#java-and-jdk), [Gradle and AGP](#gradle-and-agp) |
+| The preview shows empty lists, grey rows, or missing text | [Why the preview can differ from the app](#why-the-preview-can-differ-from-the-app) |
 | Run a single Python, JS, Dart, Java, or Kotlin file | [Running code in the editor (Run)](#running-code-in-the-editor-run) |
 | Use a library from JitPack or another repository | [Dependencies, Repository URL, and JitPack](#dependencies-repository-url-and-jitpack) |
 | Add a SHA-256 pin for a library | [Library file verification](#library-file-verification-sha-1-and-sha-256) |
@@ -703,6 +706,62 @@ web.loadUrl("file:///android_asset/index.html");
 ### Preview follows changes
 
 The preview is built from the file contents on disk at that moment. If an AI assistant changes a file through MCP, the preview that is currently open is updated too. The Refresh button reloads it manually.
+
+### Why the preview can differ from the app
+
+The preview draws the **XML only**. Whatever the app creates or fills in with code does not exist in the XML, so it is not drawn. This is a limit of the preview, not a bug in your project.
+
+| What you see in the preview | Why | What to do |
+|---|---|---|
+| Grey placeholder rows with *"its items are created in code"* | A `RecyclerView`, `ListView`, or `GridView` gets its items from an adapter in Java/Kotlin. The XML contains no items | Add `tools:listitem="@layout/item_name"` and, if you like, `tools:itemCount="4"` to the list. For a grid also add `app:layoutManager="androidx.recyclerview.widget.GridLayoutManager"` and `app:spanCount="2"` |
+| Empty `TextView`, `Button`, or title | The text is set in code (`setText`, `binding.title.text = ...`) | Add `tools:text="Sample"` to the view. If the list item layout has empty text too, add `tools:text` there as well |
+| Empty `ImageView` | The image is loaded in code | Add `tools:src="@drawable/name"` |
+| A loading screen, or not the screen you expected | With no file open, the preview shows the layout of the launcher Activity, which is often a splash or loading screen | Open the layout you want (for example `activity_main.xml`) and then press **Preview** |
+| The screen does not move on by itself after loading | Timers, loading, and automatic `startActivity` calls are code, and code is not run | Open the next layout directly, or touch a button whose click listener calls `startActivity` |
+| Data from files, network, database, or permissions is missing; views added with `addView` are missing | Code is not run | Use `tools:` sample values to stand in |
+
+`tools:` attributes exist only for the preview and the editor. They are not part of the app that is built, so they do not change how the real app behaves.
+
+**Example**
+
+```xml
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <TextView
+        android:id="@+id/sectionTitle"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        tools:text="Tools" />
+
+    <androidx.recyclerview.widget.RecyclerView
+        android:id="@+id/grid"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        app:layoutManager="androidx.recyclerview.widget.GridLayoutManager"
+        app:spanCount="2"
+        tools:listitem="@layout/item_card"
+        tools:itemCount="4" />
+</LinearLayout>
+```
+
+If you want to see the real screens with real data, build and run the app. The preview is a quick check of layout and theme, not a copy of the running app.
+
+### Libraries in the preview
+
+To draw your theme and styles (Material3, AppCompat, and so on), the preview needs the resources of those libraries. It never loads their code.
+
+- Studio Mobile ships with common Material and AndroidX libraries (for example Material, AppCompat, ConstraintLayout, RecyclerView, CardView, ViewPager2, and Navigation), so projects that use common versions open in the preview **without a build and without internet**
+- The first preview after installing or updating the app takes longer. **Preparing libraries...** unpacks the bundled libraries and **Compiling resources...** compiles their resources. The result is kept on the phone, so later previews are much faster
+- If the project uses a library or version that is not bundled, the screen says **These libraries are not bundled in Studio Mobile. Downloading them once...** and then **Downloading libraries (n)** with the file name. This happens once; the libraries are kept and reused by later previews and builds. Tap **Cancel** to stop; the preview then says it was cancelled, and the preview button loads it again
+- If that download is needed but the phone is offline, the preview shows an error that says the libraries could not be resolved
+- Only resources are used, so Material widgets are drawn as preview versions (for example `MaterialButton` as a button and `MaterialCardView` as a card). Corners, elevation, ripple, and animation can differ slightly from the real app
+
+For contributors: the bundled libraries are written to `app/src/main/assets/local_libs/maven` by the workflow step *Bundle Material and AndroidX libraries for the preview*. If that step is skipped or fails, the preview downloads the libraries on first use instead.
 
 ---
 
@@ -1480,7 +1539,7 @@ Needs the "All files access" permission (Android 11+) so that the folder is in s
 - Video wallpaper is at most **60 seconds** and 500 MB, and is only played in the code editor
 - The Studio Mobile built-in key is created automatically, is the same for all users, and **must not be used for release**; use your own key. Key import only supports the `.p12` (PKCS12) format. `FLAG_SECURE` does not prevent photographing the screen with a camera
 - Large components (NDK, JDK, Gradle, Python standard library) are downloaded on first use and need internet and storage space
-- **Preview does not run** Java/Kotlin code: logic, network, and database are not active; `ConstraintLayout` does not yet support barrier, group, and flow
+- **Preview does not run** Java/Kotlin code: logic, network, and database are not active; `ConstraintLayout` does not yet support barrier, group, and flow. Lists filled by an adapter and text set in code show sample content only through `tools:` attributes (see [Why the preview can differ from the app](#why-the-preview-can-differ-from-the-app)). A library or version that is not bundled is downloaded once at the first preview
 - **Repository** is HTTPS only; credentials, variables, `flatDir`, `mavenLocal()`, and SNAPSHOT are not supported
 - **Debug Mode** must be turned off before the app is shared
 - **GitHub Build**: only workflows with `workflow_dispatch` can be run; the repo list is limited to 1000, branches and tags to 500 each; the log shows the last 5000 lines; a fine-grained token covers only one owner
