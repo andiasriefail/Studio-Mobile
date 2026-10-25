@@ -121,6 +121,8 @@ public final class GradleRuntime {
         File toolchainScript = new File(gradleUserHome, ToolchainInitScript.FILE_NAME);
         if (toolchainScript.isFile()) { args.add("-I"); args.add(toolchainScript.getAbsolutePath()); }
         args.add("-Dorg.gradle.java.home=" + javaHome.getAbsolutePath());
+        // Local build cache: task results (resources, compiled code, dex) are stored in the Gradle home and reused when the inputs are the same.
+        args.add("--build-cache");
         // AGP normally downloads a Linux/x86-64 aapt2 from Maven, which cannot run on Android/ARM.
         if (aapt2Override != null) {
             args.add("-Pandroid.aapt2FromMavenOverride=" + aapt2Override.getAbsolutePath());
