@@ -33,6 +33,9 @@
     <string name="build">Build</string>
     <string name="preview">Preview</string>
     <string name="preview_refresh">Refresh preview</string>
+    <string name="preview_layout">Preview Layout</string>
+    <string name="preview_layout_label">Layout</string>
+    <string name="preview_layout_pick">Choose layout to preview</string>
     <string name="no_file_open">No file open</string>
     <string name="no_file_hint">Open the project structure to pick a file.</string>
     <string name="open_structure">Open structure</string>
