@@ -13,6 +13,7 @@ import com.example.studiomobile.build.LocalBuildPipeline;
 import com.example.studiomobile.build.LocalLibsInstaller;
 import com.example.studiomobile.build.dependency.ChecksumFailure;
 import com.example.studiomobile.build.network.NetworkMonitor;
+import com.example.studiomobile.build.process.ChildProcessReaper;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -25,6 +26,9 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Runs project builds without any dependency on Android UI classes.
@@ -72,18 +76,23 @@ public final class ProjectBuildService {
      * What the Build screen shows: every step, library download and DEX part with the time it started and how long it took, plus
      * warnings and errors exactly as the tools wrote them. Nothing is ever removed while the build runs. Guarded by {@link #lock}.
      */
-    private final List<Entry> entries = new ArrayList<>();
+    private final List<BuildLogRenderer.Entry> entries = new ArrayList<>();
 
-    private static final int STEP = 0, DETAIL = 1, MESSAGE = 2;
+    private static final int STEP = BuildLogRenderer.STEP, DETAIL = BuildLogRenderer.DETAIL, MESSAGE = BuildLogRenderer.MESSAGE, HEARTBEAT = BuildLogRenderer.HEARTBEAT;
 
-    private static final class Entry {
-        final int kind;
-        final String text;
-        final long at;
-        /** False for the continuation lines of a multi-line message: they get no time stamp. */
-        final boolean stamped;
-        Entry(int kind, String text, long at, boolean stamped) { this.kind = kind; this.text = text; this.at = at; this.stamped = stamped; }
-    }
+    /** Where the working copies of Gradle projects are kept between builds (inside the app's cache, so "Clear cache" resets them). */
+    private static final String WORKSPACES_FOLDER = "studio-workspaces";
+    /** While a step is quiet the log gets one "still working" line, rewritten every few seconds, so a long silent step is never mistaken for a frozen one. */
+    private static final long HEARTBEAT_EVERY_SECONDS = 5, QUIET_BEFORE_HEARTBEAT_MILLIS = 15_000, CPU_ACTIVE_TICKS = 20;
+    private final ScheduledExecutorService ticker = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "BuildHeartbeat");
+        thread.setDaemon(true);
+        return thread;
+    });
+    private volatile ScheduledFuture<?> heartbeatTask;
+    private volatile long lastRealEntryAt;
+    private volatile long previousCpuTicks = -1;
+    private volatile boolean buildOnline;
     private volatile BuildProgressTranslator progress = new BuildProgressTranslator();
 
     private volatile State state = State.IDLE;
@@ -192,96 +201,14 @@ public final class ProjectBuildService {
     public String getDisplayLog() { return getDisplayLog(0); }
 
     /**
-     * The log for the Build screen, one entry per step or detail: "[time since start] text  (how long it took)". The running step
-     * shows its time so far. Steps keep their lines for the whole build, so the time of every earlier step stays visible.
-     *
-     * The text always starts in the same column, like a book or a code block. With [columns] greater than 0 a long entry is wrapped
-     * at that width and every following line starts under the first letter of the text, never under the time stamp. The duration
-     * stays at the end of the entry's last line.
+     * The log for the Build screen (see {@link BuildLogRenderer}): every line starts its text to the right of one straight margin rule,
+     * repeated details are shown once with their count and total time, and the running step shows its time so far.
      */
     public String getDisplayLog(int columns) {
         synchronized (lock) {
-            long now = System.currentTimeMillis();
-            long start = startedAtMillis;
-            long end = finishedAtMillis != 0 ? finishedAtMillis : now;
-            // Every time stamp is padded to the widest one (a build over an hour has "[1:00:00]"), so the text column never moves.
-            int stampWidth = 0;
-            for (Entry e : entries) if (e.stamped) stampWidth = Math.max(stampWidth, clock(e.at - start).length() + 2);
-            if (stampWidth == 0) stampWidth = 7;
-            String gutter = spaces(stampWidth + 1);
-            StringBuilder out = new StringBuilder();
-            for (int i = 0; i < entries.size(); i++) {
-                Entry e = entries.get(i);
-                if (out.length() > 0) out.append('\n');
-                String first;
-                if (e.stamped) {
-                    String stamp = "[" + clock(e.at - start) + "]";
-                    first = stamp + spaces(stampWidth + 1 - stamp.length());
-                } else first = gutter;
-                String duration = e.stamped && e.kind != MESSAGE ? "(" + clock(nextStart(i, end) - e.at) + ")" : "";
-                out.append(wrapEntry(first, gutter, e.kind == DETAIL ? "  " + e.text : e.text, duration, columns));
-            }
-            return out.toString();
+            long end = finishedAtMillis != 0 ? finishedAtMillis : System.currentTimeMillis();
+            return BuildLogRenderer.render(entries, startedAtMillis, end, columns);
         }
-    }
-
-    private static String spaces(int count) {
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < count; i++) out.append(' ');
-        return out.toString();
-    }
-
-    /**
-     * One entry as text. [first] starts the first line (the padded time stamp), [indent] starts every other line. Text that begins
-     * with spaces (details, stack traces) keeps that indentation on the lines it wraps into. Breaks happen at spaces; a word longer
-     * than the line is cut. The duration stays on the last line when it fits, otherwise it gets a line of its own under the text.
-     */
-    static String wrapEntry(String first, String indent, String text, String duration, int columns) {
-        String tail = duration.isEmpty() ? "" : "  " + duration;
-        int width = columns - indent.length();
-        if (columns <= 0 || width < 12) return first + text + tail;
-        int lead = 0;
-        while (lead < text.length() && text.charAt(lead) == ' ') lead++;
-        String carry = spaces(Math.min(lead, width / 2));
-        List<String> lines = new ArrayList<>();
-        String rest = text;
-        while (true) {
-            String prefix = lines.isEmpty() ? "" : carry;
-            int room = width - prefix.length();
-            if (rest.length() <= room) { lines.add(prefix + rest); break; }
-            int cut = rest.lastIndexOf(' ', room);
-            int skip;
-            if (cut <= (lines.isEmpty() ? lead : 0)) { cut = room; skip = room; }   // one long word: cut it
-            else {
-                skip = cut;
-                while (skip < rest.length() && rest.charAt(skip) == ' ') skip++;
-                while (cut > 0 && rest.charAt(cut - 1) == ' ') cut--;                // no trailing spaces
-            }
-            lines.add(prefix + rest.substring(0, cut));
-            rest = rest.substring(skip);
-            if (rest.isEmpty()) break;
-        }
-        if (!tail.isEmpty()) {
-            String last = lines.get(lines.size() - 1);
-            if (last.length() + tail.length() <= width) lines.set(lines.size() - 1, last + tail);
-            else lines.add(duration);
-        }
-        StringBuilder out = new StringBuilder();
-        for (int i = 0; i < lines.size(); i++) {
-            if (i > 0) out.append('\n');
-            out.append(i == 0 ? first : indent).append(lines.get(i));
-        }
-        return out.toString();
-    }
-
-    /** A step lasts until the next step starts; a detail lasts until the next step or detail starts. Falls back to the end time. */
-    private long nextStart(int index, long fallback) {
-        int kind = entries.get(index).kind;
-        for (int j = index + 1; j < entries.size(); j++) {
-            int other = entries.get(j).kind;
-            if (other == STEP || (other == DETAIL && kind == DETAIL)) return entries.get(j).at;
-        }
-        return fallback;
     }
 
     /** Log text from the given character offset, so a poller can fetch only what is new. */
@@ -308,11 +235,7 @@ public final class ProjectBuildService {
         return line + "  ·  " + clock(now - liveSinceMillis) + "  (total " + clock(now - startedAtMillis) + ")";
     }
 
-    private static String clock(long millis) {
-        long seconds = Math.max(0, millis / 1000);
-        return seconds >= 3600 ? String.format(java.util.Locale.ROOT, "%d:%02d:%02d", seconds / 3600, (seconds / 60) % 60, seconds % 60)
-            : String.format(java.util.Locale.ROOT, "%02d:%02d", seconds / 60, seconds % 60);
-    }
+    private static String clock(long millis) { return BuildLogRenderer.clock(millis); }
 
     /** Plain-language name of the step the build has reached ("Preparing libraries…"), for the notification. */
     public String getProgressLabel() { return progress.currentLabel(); }
@@ -414,6 +337,11 @@ public final class ProjectBuildService {
         }
         notifyState(State.RUNNING);
         addStep(LanguageUi.BUILD_PREPARING);
+        previousCpuTicks = -1;
+        buildOnline = true;
+        ScheduledFuture<?> oldTask = heartbeatTask;
+        if (oldTask != null) oldTask.cancel(false);
+        heartbeatTask = ticker.scheduleWithFixedDelay(this::beat, HEARTBEAT_EVERY_SECONDS, HEARTBEAT_EVERY_SECONDS, TimeUnit.SECONDS);
         BuildForegroundService.start(appContext);   // keeps the build alive when the app is left; a failure here never blocks the build
         worker.execute(() -> run(project, bundle));
         return jobId;
@@ -435,10 +363,22 @@ public final class ProjectBuildService {
         String failureStage = "BUILD";
         try {
             appendDetail(LanguageUi.BUILD_TOOLCHAIN + "\n" + LocalLibsInstaller.install(appContext));   // internal: stays out of the screen log
-            File buildRoot = new File(appContext.getCacheDir(), "user-project-build");
-            copiedProject = buildRoot;
-            deleteRecursively(buildRoot);
-            copyDirectory(project, buildRoot);
+            File buildRoot;
+            if (canKeepWorkspace(project)) {
+                // Gradle route: the working copy stays between builds, so Gradle finds its own outputs and state and redoes only what changed.
+                File workspaces = new File(appContext.getCacheDir(), WORKSPACES_FOLDER);
+                buildRoot = ProjectWorkspace.folderFor(workspaces, project);
+                ProjectWorkspace.evictOldest(workspaces, buildRoot);
+                boolean fresh = ProjectWorkspace.ensureStamp(buildRoot, workspaceStamp());
+                ProjectWorkspace.sync(project, buildRoot);
+                buildRoot.setLastModified(System.currentTimeMillis());
+                appendInfo("[internal] Project workspace: " + (fresh ? "new" : "reused") + " (" + buildRoot.getName() + ")");
+            } else {
+                buildRoot = new File(appContext.getCacheDir(), "user-project-build");
+                copiedProject = buildRoot;
+                deleteRecursively(buildRoot);
+                copyDirectory(project, buildRoot);
+            }
             com.example.studiomobile.build.BuildFailureReport.begin(readAppName(buildRoot, project.getName()));   // error log file is named after the app
             // A Flutter project (pubspec.yaml with the Flutter SDK dependency) has its own route; the Android crash catcher is not injected into it.
             com.example.studiomobile.build.flutter.FlutterProjectDetector.Detection flutter = com.example.studiomobile.build.flutter.FlutterProjectDetector.detect(buildRoot);
@@ -466,6 +406,7 @@ public final class ProjectBuildService {
             if (flutter.isFlutter()) appendInfo("[internal] Build route: Flutter (pubspec.yaml depends on the Flutter SDK)");
             else if (hasBuildFiles) appendInfo("[internal] Build route: " + (useGradle ? "Gradle (" + gradleReason + ")" : "local pipeline (no Gradle-only feature found)"));
             BuildConfiguration configuration = new BuildConfiguration(buildRoot, apkOutput, !hasBuildFiles && !flutter.isFlutter(), bundle);
+            buildOnline = !configuration.isOfflineMode();
             BuildPipeline pipeline = flutter.isFlutter() ? new com.example.studiomobile.build.flutter.FlutterBuildPipeline(appContext)
                 : useGradle ? new GradleBuildPipeline(appContext) : new LocalBuildPipeline(appContext);
             activePipeline = pipeline;
@@ -524,12 +465,17 @@ public final class ProjectBuildService {
             error.printStackTrace(new java.io.PrintWriter(stackText));
             appendShown("ERROR: Build stopped by " + error.getClass().getName() + ": " + error.getMessage() + "\n" + stackText);
         } finally {
+            ScheduledFuture<?> beatTask = heartbeatTask;
+            if (beatTask != null) beatTask.cancel(false);
             activePipeline = null;
             activeHooks = null;
             if (finalState == State.FAILED) saveFailureReport(failureStage, crash);   // every failed build lands in Studio Mobile/Build Error Logs
             long endedAt = System.currentTimeMillis();
             finishedAtMillis = endedAt;
             showOnly("Total build time: " + clock(endedAt - startedAtMillis));   // the whole build, from the first step to the result
+            String perPart;
+            synchronized (lock) { perPart = BuildLogRenderer.phaseSummary(entries, endedAt); }
+            if (!perPart.isEmpty()) showOnly(perPart);   // where the time went, in one line
             synchronized (lock) {
                 state = finalState;
                 lock.notifyAll();
@@ -657,7 +603,7 @@ public final class ProjectBuildService {
     private void addDetail(String text) {
         synchronized (lock) {
             if (!entries.isEmpty()) {
-                Entry last = entries.get(entries.size() - 1);
+                BuildLogRenderer.Entry last = entries.get(entries.size() - 1);
                 if (last.kind == DETAIL && last.text.equals(text)) return;
             }
         }
@@ -672,7 +618,9 @@ public final class ProjectBuildService {
 
     private void add(int kind, String text, boolean stamped) {
         String safe = LogPathMasker.mask(text);
-        synchronized (lock) { entries.add(new Entry(kind, safe, System.currentTimeMillis(), stamped)); }
+        long now = System.currentTimeMillis();
+        lastRealEntryAt = now;
+        synchronized (lock) { entries.add(new BuildLogRenderer.Entry(kind, safe, now, stamped)); }
         for (Listener listener : listeners) listener.onLogAppended(safe);
     }
 
@@ -697,6 +645,62 @@ public final class ProjectBuildService {
 
     private void notifyState(State newState) {
         for (Listener listener : listeners) listener.onStateChanged(newState);
+    }
+
+    /**
+     * One "still working" line under a step that has been quiet for a while, rewritten in place every few seconds. It says whether the
+     * build processes are using the CPU, whether the network is gone, or how much has been downloaded, in plain words only.
+     */
+    private void beat() {
+        try {
+            if (state != State.RUNNING) return;
+            long ticks = ChildProcessReaper.descendantsCpuTicks();
+            long before = previousCpuTicks;
+            previousCpuTicks = ticks;
+            long now = System.currentTimeMillis();
+            long quiet = now - lastRealEntryAt;
+            if (quiet < QUIET_BEFORE_HEARTBEAT_MILLIS) return;
+            String live = liveLine;
+            String text;
+            if (buildOnline && !NetworkMonitor.isOnlineNow(appContext)) {
+                text = "· waiting for the network · " + clock(quiet);
+            } else if (live != null && live.contains(" MB")) {
+                text = "· " + (live.endsWith("…") ? live.substring(0, live.length() - 1) : live) + " · " + clock(quiet);
+            } else {
+                text = "· still working · " + clock(quiet);
+                if (before >= 0 && ticks >= before) text += ticks - before >= CPU_ACTIVE_TICKS ? " · CPU active" : " · waiting, little activity";
+            }
+            String safe = LogPathMasker.mask(text);
+            synchronized (lock) {
+                int count = entries.size();
+                BuildLogRenderer.Entry last = count == 0 ? null : entries.get(count - 1);
+                if (last != null && last.kind == HEARTBEAT) last.text = safe;
+                else entries.add(new BuildLogRenderer.Entry(HEARTBEAT, safe, now, true));
+            }
+            for (Listener listener : listeners) listener.onLogAppended(safe);
+        } catch (RuntimeException ignored) { /* a missed beat is never worth a failed build */ }
+    }
+
+    /** True when the Gradle route will be used for this project, so its working copy can be kept between builds. Other routes keep the old per-build copy. */
+    private boolean canKeepWorkspace(File project) {
+        try {
+            if (com.example.studiomobile.build.flutter.FlutterProjectDetector.detect(project).isFlutter()) return false;
+            if (!GradleBuildPipeline.isGradleProject(project)) return false;
+            return com.example.studiomobile.build.GradleNeedDetector.reasonToUseGradle(project) != null && hasGradleRuntime();
+        } catch (RuntimeException unknown) { return false; }
+    }
+
+    /** Changes with every update of the app, so a new app version starts from a clean working copy once. */
+    private String workspaceStamp() {
+        try { return "v1:" + appContext.getPackageManager().getPackageInfo(appContext.getPackageName(), 0).lastUpdateTime; }
+        catch (Exception unknown) { return "v1"; }
+    }
+
+    /** Removes the saved working copies; the next build of every project is a full build. Refused while a build is running. */
+    public boolean cleanWorkspaces() {
+        if (state == State.RUNNING) return false;
+        ProjectWorkspace.deleteTree(new File(appContext.getCacheDir(), WORKSPACES_FOLDER));
+        return true;
     }
 
     // ------------------------------------------------------------------ helpers (moved from MainActivity)

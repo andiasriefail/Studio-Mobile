@@ -1,5 +1,7 @@
 package com.example.studiomobile.workspace;
 
+import com.example.studiomobile.LanguageUi;
+
 import java.util.Locale;
 
 /**
@@ -19,16 +21,21 @@ final class BuildProgressTranslator {
         "Checking project structure…",
         "Checking the manifest and build setup…",
         "Preparing libraries…",
+        "Starting the build…",
         "Processing resources…",
         "Compiling code…",
         "Running crash check…",
-        "Optimizing code for Android…",
+        "Converting code to run on Android…",
         "Packaging the app…",
         "Signing and verifying the app…",
         "Almost done…"
     };
     static final int LAST_STEP = STEPS.length - 1;
     static final int DOWNLOAD_STEP = 2;
+    /** The step that covers starting the build engine and configuring the project (on a phone this is often the longest part). */
+    static final int START_STEP = 3;
+    /** Text of the [step] line the Gradle route writes when it launches the Java runtime; it moves the log to {@link #START_STEP}. */
+    static final String ENGINE_START = LanguageUi.BUILD_ENGINE_START;
     static final String PREPARING = "Preparing your project…";
     static final String SUCCESS = "Build successful";
 
@@ -46,31 +53,40 @@ final class BuildProgressTranslator {
      */
     static final String TAG_STEP = "[step]", TAG_PROGRESS = "[progress]", TAG_INTERNAL = "[internal]";
 
-    /** Friendly detail for a Gradle task: {text, task-name fragments...}. The more specific fragments come first; unlisted tasks stay hidden. */
+    /**
+     * Friendly detail for a Gradle task: {text, task-name fragments...}. The more specific fragments come first; unlisted tasks stay hidden.
+     * Fragments are written without the build variant: "debug" and "release" are removed from the task name first, so the same table
+     * reads a debug build, a release build and an AAB export.
+     */
     private static final String[][] GRADLE_TASKS = {
-        {"Processing resources", "packagedebugresources", "mergedebugresources", "processdebugresources", "generatedebugresources", "mapdebugsourcesetpaths", "compiledebugaidl", "extractdeeplinks"},
-        {"Merging the manifest", "processdebugmanifest", "createdebugcompatiblescreenmanifests", "processdebugmanifestforpackage"},
-        {"Checking libraries", "checkdebugaarmetadata", "checkdebugduplicateclasses", "predebugbuild", "prebuild", "checkjetifier"},
-        {"Generating helper code", "generatedebugbuildconfig", "generatedebugresvalues", "kapt", "ksp"},
-        {"Compiling Kotlin code", "compiledebugkotlin"},
-        {"Compiling Java code", "compiledebugjavawithjavac"},
-        {"Converting code to run on Android", "dexbuilderdebug", "mergeextdexdebug", "mergeprojectdexdebug", "mergelibdexdebug", "mergedexdebug"},
-        {"Merging native libraries", "mergedebugnativelibs", "stripdebugdebugsymbols"},
-        {"Creating the app bundle", "packagedebugbundle", "builddebugprebundle", ":bundledebug", "mergedebugnativedebugmetadata"},
-        {"Signing the app", "validatesigningdebug", "signdebugbundle", "writedebugsigningconfigversions"},
-        {"Assembling the app file", "packagedebug", "createdebugapklistingfileredirect"},
-        {"Finishing up", "assembledebug"},
+        {"Merging resources", "mergeresources", "packageresources"},
+        {"Processing resources", "processresources", "generateresources", "mapsourcesetpaths", "compileaidl", "extractdeeplinks", "parselocalresources"},
+        {"Merging the manifest", "processmanifest", "processmainmanifest", "createcompatiblescreenmanifests"},
+        {"Checking libraries", "checkaarmetadata", "checkduplicateclasses", "prebuild", "checkjetifier"},
+        {"Generating helper code", "generatebuildconfig", "generateresvalues", "kapt", "ksp"},
+        {"Compiling Kotlin code", "compilekotlin"},
+        {"Compiling Java code", "compilejavawithjavac"},
+        {"Shrinking and optimizing code", "minifywithr8", "shrinkresources"},
+        {"Converting libraries", "mergeextdex", "mergelibdex", "desugarfiledependencies"},
+        {"Converting code", "dexbuilder", "mergeprojectdex", "mergedex"},
+        {"Merging native libraries", "mergenativelibs", "stripsymbols", "mergenativemetadata"},
+        {"Creating the app bundle", "packagebundle", "prebundle"},
+        {"Checking the signing setup", "validatesigning", "writesigningconfigversions"},
+        {"Signing the app", "signbundle"},
+        {"Assembling the app file", ":package", "createapklistingfileredirect"},
+        {"Finishing up", ":assemble", ":bundle"},
     };
 
-    /** Rules are checked in order, so the more specific (later) stages come first. */
+    /** Rules are checked in order, so the more specific (later) stages come first. Same variant-free fragments as above, plus the local pipeline's stage names. */
     private static final String[][] RULES = {
-        {"3", "packagedebugresources"},
-        {"8", "apk signing", "signing and verification", "app bundle packaging", "packagedebugbundle", "signdebugbundle", ":bundledebug"},
-        {"7", "native c/c++ build", "apk packaging", "apk alignment", "packagedebug", "assembledebug"},
-        {"6", "dex generation", "code shrinking", "dexbuilder", "mergeprojectdex", "mergeextdex"},
-        {"5", "crash check"},
-        {"4", "dart compilation", "java/kotlin compilation", "compiledebugkotlin", "compiledebugjavawithjavac"},
-        {"3", "resource compilation", "resource linking", "generated sources", "jsx/typescript", "aapt", "mergedebugresources", "processdebugresources"},
+        {"4", "packageresources"},
+        {"9", "apk signing", "signing and verification", "signbundle"},
+        {"8", "native c/c++ build", "apk packaging", "apk alignment", "app bundle packaging", "packagebundle", ":bundle", ":package", ":assemble"},
+        {"7", "dex generation", "code shrinking", "dexbuilder", "mergeprojectdex", "minifywithr8"},
+        {"6", "crash check"},
+        {"5", "dart compilation", "java/kotlin compilation", "compilekotlin", "compilejavawithjavac"},
+        {"4", "resource compilation", "resource linking", "generated sources", "jsx/typescript", "aapt", "mergeresources", "processresources"},
+        {"3", "single-use daemon", "starting a gradle daemon", "> configure project"},
         {"2", "dependency resolution", "project modules"},
         {"1", "java level", "toolchain", "verifying java", "manifest", "device check for native"},
         {"0", "validating project structure", "gradle project detected"},
@@ -87,7 +103,7 @@ final class BuildProgressTranslator {
         {"generated sources", "Generating helper code…"},
         {"java/kotlin compilation", "Compiling code…"},
         {"crash check", "Running crash check…"},
-        {"dex generation", "Optimizing code for Android…"},
+        {"dex generation", "Converting code to run on Android…"},
         {"code shrinking", "Shrinking and optimizing code…"},
         {"native c/c++ build", "Building native libraries…"},
         {"apk packaging", "Packaging the app…"},
@@ -151,7 +167,7 @@ final class BuildProgressTranslator {
     private static String gradleText(String raw) {
         String text = raw.trim();
         String lower = text.toLowerCase(Locale.ROOT);
-        if (lower.startsWith("starting a gradle daemon") || lower.contains("single-use daemon")) return "Starting the build engine";
+        if (lower.startsWith("starting a gradle daemon") || lower.contains("single-use daemon")) return "Preparing the build engine";
         if (lower.startsWith("> configure project")) return "Configuring the project";
         if (lower.startsWith("downloading http")) {
             java.util.regex.Matcher url = GET_URL_ANY.matcher(text);
@@ -164,8 +180,9 @@ final class BuildProgressTranslator {
             return "Downloading libraries";
         }
         if (lower.startsWith("> task :")) {
+            String task = withoutVariant(lower);
             for (String[] rule : GRADLE_TASKS)
-                for (int i = 1; i < rule.length; i++) if (lower.contains(rule[i])) return rule[0];
+                for (int i = 1; i < rule.length; i++) if (task.contains(rule[i])) return rule[0];
         }
         return null;
     }
@@ -207,7 +224,9 @@ final class BuildProgressTranslator {
     synchronized String translate(String raw) {
         if (raw == null) return null;
         String lower = raw.toLowerCase(Locale.ROOT).trim();
-        if (tagged(raw, TAG_STEP) != null || tagged(raw, TAG_PROGRESS) != null || tagged(raw, TAG_INTERNAL) != null) return null;   // written for the screen already; never a problem, never a new step
+        String stepTag = tagged(raw, TAG_STEP);
+        if (stepTag != null) return stepTag.equals(ENGINE_START) ? advanceTo(START_STEP) : null;   // only the engine start is also a step of its own
+        if (tagged(raw, TAG_PROGRESS) != null || tagged(raw, TAG_INTERNAL) != null) return null;   // written for the screen already; never a problem, never a new step
         if (isKnownNotice(lower)) return null;   // stays in the full log, never on the screen
         if (lower.startsWith("[dex]")) return null;   // progress of the DEX step: only the live line uses it (a JAR name may contain "error")
         if (isDownloadLabel(lower)) return lower.contains("-> failed") ? raw : advanceTo(DOWNLOAD_STEP);
@@ -216,16 +235,14 @@ final class BuildProgressTranslator {
         return step < 0 ? null : advanceTo(step);
     }
 
-    /** Moves forward to the given step (never backwards) and returns the new step lines, or null if nothing new. */
+    /**
+     * Moves forward to the given step (never backwards) and returns that step's line, or null if nothing new. Steps that were skipped are
+     * not listed: a route that never runs a stage (no crash check, no separate engine start) must not show it with 0:00.
+     */
     synchronized String advanceTo(int step) {
         if (step <= reached) return null;
-        StringBuilder out = new StringBuilder();
-        for (int i = reached + 1; i <= step; i++) {
-            if (out.length() > 0) out.append('\n');
-            out.append(STEPS[i]);
-        }
         reached = step;
-        return out.toString();
+        return STEPS[step];
     }
 
     /** The step reached so far (0-based), or -1 before the first one. */
@@ -238,7 +255,7 @@ final class BuildProgressTranslator {
 
     /** "[dex] start 3/13 poi.jar" becomes "Optimizing code for Android… 2 of 13 parts done · now: poi.jar". */
     private static String dexActivity(String line) {
-        String base = "Optimizing code for Android…";
+        String base = "Converting code to run on Android…";
         java.util.regex.Matcher m = DEX_LINE.matcher(line);
         if (m.matches()) {
             int n = Integer.parseInt(m.group(2)), total = Integer.parseInt(m.group(3));
@@ -255,21 +272,27 @@ final class BuildProgressTranslator {
     }
 
     private static int stepOf(String lower) {
+        String line = withoutVariant(lower);
         for (String[] rule : RULES) {
-            for (int i = 1; i < rule.length; i++) if (lower.contains(rule[i])) return Integer.parseInt(rule[0]);
+            for (int i = 1; i < rule.length; i++) if (line.contains(rule[i])) return Integer.parseInt(rule[0]);
         }
         return -1;
     }
 
+    /** "> task :app:mergeDebugResources" and "...mergeReleaseResources" both become "...mergeresources", so one table serves every variant. */
+    static String withoutVariant(String lower) { return lower.replace("debug", "").replace("release", ""); }
+
     /** Tool output arrives as plain lines, so errors and warnings have to be recognised by their wording. */
     /**
-     * Notices AGP prints because of how Studio Mobile starts Gradle, which the reader cannot act on: the "experimental" warning for the
-     * aapt2 override (it also prints the app's private path) and its "Add android.sync.suppressAgpWarnings=..." follow-up line. Matched
-     * narrowly, so every other warning is still shown.
+     * Notices Gradle and AGP print because of how Studio Mobile starts Gradle, which the reader cannot act on: the "experimental" warning
+     * for the aapt2 override (it also prints the app's private path), its "Add android.sync.suppressAgpWarnings=..." follow-up line, and
+     * the daemon environment note. Matched narrowly, so every other warning is still shown.
      */
     static boolean isKnownNotice(String lower) {
         if (lower == null) return false;
         if (lower.contains("aapt2frommavenoverride") && lower.contains("experimental")) return true;
+        // Gradle cannot hand the phone's environment variables to its daemon ("no native integration with this operating environment"); harmless here.
+        if (lower.contains("unable to set daemon's environment variables")) return true;
         return lower.contains("suppressagpwarnings=unsupported_project_option_use");
     }
 
