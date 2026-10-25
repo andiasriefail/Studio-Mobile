@@ -51,7 +51,7 @@ public final class GradleBuildPipeline implements BuildPipeline {
         if (levelProblem != null) return failed(levelProblem);
         File output = configuration.getOutputDirectory();
         if (!output.exists() && !output.mkdirs()) return failed("Could not create APK output directory: " + output);
-        logger.onInfo("[step] Checking the build tools");
+        logger.onInfo("[step] Checking the tools");
         GradleRuntimeManager.Resolution resolution = runtimeManager().resolve(project, configuration.isOfflineMode(), new ScreenLogger(logger));
         if (cancelled) return new BuildResult(BuildResult.Status.CANCELLED, null, "Gradle build cancelled.");
         if (!resolution.isUsable()) {
@@ -84,7 +84,7 @@ public final class GradleBuildPipeline implements BuildPipeline {
         NetworkMonitor monitor = null;
         ConnectionWatchdog watchdog = null;
         try {
-            logger.onInfo("[step] Starting the build engine");
+            logger.onInfo("[step] " + com.example.studiomobile.LanguageUi.BUILD_ENGINE_START);
             watcher.start();
             connectionLost = false;
             ChildProcessReaper.killStaleGradleDaemons();   // a daemon left by an earlier cancelled build must not compete with this one
@@ -121,7 +121,7 @@ public final class GradleBuildPipeline implements BuildPipeline {
                     ChildProcessReaper.killNew(baseline);   // nothing of the failed run may still be alive when the second run starts
                     logger.onInfo("[step] Preparing the Android SDK");
                     logger.onWarning("The project asked for Android SDK packages that are not installed. They were provided from the installed platform; building again.");
-                    logger.onInfo("[step] Starting the build engine");
+                    logger.onInfo("[step] " + com.example.studiomobile.LanguageUi.BUILD_ENGINE_START);
                     result = runner.run(command, project, 30 * 60, logger, runtime.buildEnvironment());
                 }
             }
@@ -144,7 +144,7 @@ public final class GradleBuildPipeline implements BuildPipeline {
                 logger.onInfo("AAB artifact found: " + aab.getAbsolutePath());
             }
             logger.onInfo("APK artifact found: " + destination.getAbsolutePath());
-            logger.onWarning("This result confirms Gradle produced an APK artifact; signature verification is not performed by this Gradle adapter yet.");
+            logger.onInfo("[internal] This result confirms Gradle produced an APK artifact; signature verification is not performed by this Gradle adapter yet.");
             return new BuildResult(BuildResult.Status.SUCCESS, destination, "Gradle build completed and an APK artifact was found.");
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
@@ -156,7 +156,7 @@ public final class GradleBuildPipeline implements BuildPipeline {
         } finally {
             if (watchdog != null) watchdog.finish();
             if (monitor != null) monitor.stop();
-            if (baseline != null) ChildProcessReaper.killNew(baseline);   // no Gradle JVM is left behind, whatever way the build ended
+            if (baseline != null) ChildProcessReaper.killNewGradle(baseline);   // no Gradle JVM is left behind; the Kotlin compile daemon stays for the next build
             activeProcess = null;
             watcher.finish();
         }
@@ -181,12 +181,15 @@ public final class GradleBuildPipeline implements BuildPipeline {
      */
     private static final class ScreenLogger implements BuildLogger {
         private final BuildLogger delegate;
+        /** True once this run had to download or unpack a component; if none was needed the screen says so instead of staying silent. */
+        private boolean installedSomething;
         ScreenLogger(BuildLogger delegate) { this.delegate = delegate; }
         @Override public void onInfo(String message) {
             if (message == null) return;
             delegate.onInfo("[internal] " + message);
             String friendly = friendly(message);
-            if (friendly != null) delegate.onInfo(friendly);
+            if (friendly == null) return;
+            for (String line : friendly.split("\n")) delegate.onInfo(line);
         }
         @Override public void onWarning(String message) {
             // Notes about the app's own tool catalog are for the log file; the screen gets the plain-words result instead.
@@ -194,15 +197,24 @@ public final class GradleBuildPipeline implements BuildPipeline {
         }
         @Override public void onError(String message, Throwable cause) { delegate.onError(message, cause); }
         /** Components of the app's own catalog (Gradle, JDK, NDK, Python) are deliberately not named on the screen. */
-        private static String friendly(String message) {
+        private String friendly(String message) {
             if (message.startsWith("Project requirements")) return "[step] Reading the project requirements";
-            if (message.contains(" MiB downloaded")) return "[progress] Downloading the build tools · " + message.substring(message.lastIndexOf(": ") + 2).replace(" MiB downloaded", " MB");
-            if (message.startsWith("Downloading ")) return "[step] Downloading the build tools";
-            if (message.startsWith("Unpacking bundled")) return "[step] Installing the build tools";
-            if (message.startsWith("Ready:")) return "[step] Build tools ready";
-            if (message.startsWith("java launcher self-test passed")) return "[step] Verifying the build tools";
-            if (message.startsWith("Dependency preflight")) return "[step] Checking cached libraries";
+            if (message.contains(" MiB downloaded")) return "[progress] Download the tools · " + message.substring(message.lastIndexOf(": ") + 2).replace(" MiB downloaded", " MB");
+            if (message.startsWith("Downloading ")) { installedSomething = true; return "[step] Download the tools"; }
+            if (message.startsWith("Unpacking bundled")) { installedSomething = true; return "[step] Preparing Java runtime"; }
+            if (message.startsWith("Ready:")) return "[step] Tools ready";
+            if (message.startsWith("java launcher self-test passed"))
+                return (installedSomething ? "" : "[step] Installed tools already\n") + "[step] Verifying the tools";
+            if (message.startsWith("Dependency preflight")) return preflightLabel(message);
             return null;
+        }
+        /** "Dependency preflight: 3 declared, 0 not in cache, ..." says whether the project's own libraries still have to be downloaded. */
+        private static String preflightLabel(String message) {
+            java.util.regex.Matcher missing = java.util.regex.Pattern.compile("(\\d+) not in cache").matcher(message);
+            if (!missing.find()) return "[step] Checking cached libraries";
+            int count = Integer.parseInt(missing.group(1));
+            if (count == 0) return "[step] Libraries already saved";
+            return "[step] " + count + (count == 1 ? " library" : " libraries") + " to download";
         }
     }
 
@@ -220,7 +232,7 @@ public final class GradleBuildPipeline implements BuildPipeline {
         }
         void finish() { stopped = true; interrupt(); }
         @Override public void run() {
-            long base = size(modules), last = base, reported = base;
+            long base = downloadedBytes(), last = base, reported = base;
             scan(new java.util.ArrayList<String>());   // what is already cached is not a download
             String latest = null;
             while (!stopped) {
@@ -230,7 +242,7 @@ public final class GradleBuildPipeline implements BuildPipeline {
                 for (int i = 0; i < fresh.size() && i < MAX_LINES_PER_CHECK; i++) logger.onInfo("[step] " + describe(fresh.get(i)));
                 if (fresh.size() > MAX_LINES_PER_CHECK) logger.onInfo("[step] Downloaded " + (fresh.size() - MAX_LINES_PER_CHECK) + " more libraries");
                 if (!fresh.isEmpty()) latest = fresh.get(fresh.size() - 1);
-                long now = size(modules);
+                long now = downloadedBytes();
                 if (now > last && now - reported >= 256 * 1024) {
                     reported = now;
                     logger.onInfo("[progress] Downloading libraries · " + megabytes(now - base) + " so far" + (latest == null ? "" : " · last: " + latest));
@@ -261,6 +273,21 @@ public final class GradleBuildPipeline implements BuildPipeline {
                     }
                 }
             }
+        }
+        /**
+         * Size of the artifacts in the dependency cache. The index and metadata files (metadata-*, lock files) are left out: Gradle rewrites
+         * them on every build, even when it only reads the cache, and counting them made a cached build look like a download.
+         */
+        private long downloadedBytes() {
+            File[] children = modules.listFiles();
+            if (children == null) return 0;
+            long total = 0;
+            for (File child : children) {
+                String name = child.getName();
+                if (name.startsWith("metadata-") || name.endsWith(".lock") || name.equals("gc.properties")) continue;
+                total += size(child);
+            }
+            return total;
         }
         private static String megabytes(long bytes) { return String.format(java.util.Locale.ROOT, "%.1f MB", bytes / (1024.0 * 1024.0)); }
         private static long size(File file) {
