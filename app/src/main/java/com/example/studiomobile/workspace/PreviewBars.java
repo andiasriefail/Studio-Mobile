@@ -24,6 +24,7 @@ public final class PreviewBars {
     /** Filled from the project's theme; when the theme says nothing, from the Android default theme (see {@link #systemDefaults}). */
     public int statusColor, navColor, actionBarColor;
     public boolean lightStatus, lightNav;
+    public int behindColor = Color.WHITE;
     /** The code asks for the "up" arrow in the action bar (setDisplayHomeAsUpEnabled(true)). */
     public boolean homeAsUp;
     public String statusInfo = "", navInfo = "", actionBarInfo = "";

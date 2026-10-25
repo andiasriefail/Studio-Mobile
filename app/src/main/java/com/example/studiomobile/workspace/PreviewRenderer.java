@@ -288,8 +288,13 @@ public final class PreviewRenderer {
 
     // ------------------------------------------------------------------ bars
 
+    private static boolean inkIsDark(int background, int behind) {
+        int surface = Color.alpha(background) >= 160 ? background : behind;
+        return androidx.core.graphics.ColorUtils.calculateLuminance(surface | 0xFF000000) > 0.5;
+    }
+
     private static View statusBar(Context context, PreviewBars bars, int background, TipListener tips, View shade, boolean vpn) {
-        StatusBarView view = new StatusBarView(context, bars.lightStatus ? 0xDD000000 : 0xFFFFFFFF, vpn);
+        StatusBarView view = new StatusBarView(context, inkIsDark(background, bars.behindColor) ? 0xDD000000 : 0xFFFFFFFF, vpn);
         view.setBackgroundColor(background);
         if (shade == null) view.setOnClickListener(v -> tips.onTip(bars.statusInfo));
         else PreviewShade.attachOpener(view, shade);   // tap or swipe: the project's notification shade (tiles, media notification)
@@ -297,7 +302,7 @@ public final class PreviewRenderer {
     }
 
     private static View navBar(Context context, PreviewBars bars, int background, boolean threeButton, Runnable onBack, TipListener tips, Runnable onHome) {
-        NavBarView view = new NavBarView(context, bars.lightNav ? 0xCC000000 : 0xCCFFFFFF, threeButton, onBack, () -> { if (onHome != null) onHome.run(); else tips.onTip(bars.navInfo); });
+        NavBarView view = new NavBarView(context, inkIsDark(background, bars.behindColor) ? 0xCC000000 : 0xCCFFFFFF, threeButton, onBack, () -> { if (onHome != null) onHome.run(); else tips.onTip(bars.navInfo); });
         view.setBackgroundColor(background);
         return view;
     }
@@ -584,7 +589,9 @@ public final class PreviewRenderer {
         private Entry build(ProjectPreview.Prepared p) {
             final PreviewBars bars = p.bars;
             FrameLayout screen = new FrameLayout(activity);
-            screen.setBackground(windowBackground(p));
+            Drawable windowBg = windowBackground(p);
+            bars.behindColor = windowBg instanceof ColorDrawable ? ((ColorDrawable) windowBg).getColor() : Color.WHITE;
+            screen.setBackground(windowBg);
             FrameLayout content = new FrameLayout(activity);
             fillContent(activity, p, content, screen, tips, this);
 
