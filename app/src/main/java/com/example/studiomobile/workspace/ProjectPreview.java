@@ -325,6 +325,8 @@ public final class ProjectPreview {
     // ------------------------------------------------------------------ AAPT2
 
     private static File buildResources(Context context, File project, Progress progress) throws Exception {
+        File saved = new File(new File(context.getFilesDir(), "preview-apk"), resourceKey(context, project) + ".ap_");
+        if (saved.isFile() && saved.length() > 0) { saved.setLastModified(System.currentTimeMillis()); return saved; }
         File cache = context.getCacheDir();
         File[] old = cache.listFiles((dir, name) -> name.startsWith("preview-"));
         File work = new File(cache, "preview-" + System.currentTimeMillis());
@@ -356,7 +358,80 @@ public final class ProjectPreview {
         }
         File apk = stageContext.getOutput("resourceApk");
         if (apk == null || !apk.isFile()) throw new IllegalStateException("AAPT2 produced no resources.\n\n" + lastLines(log.toString(), 14));
-        return apk;
+        return keep(apk, saved);
+    }
+
+    private static File keep(File apk, File saved) {
+        File directory = saved.getParentFile();
+        File temporary = new File(directory, saved.getName() + ".tmp");
+        try {
+            if (!directory.isDirectory() && !directory.mkdirs()) return apk;
+            java.nio.file.Files.copy(apk.toPath(), temporary.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            if (!temporary.renameTo(saved)) { temporary.delete(); return apk; }
+        } catch (IOException failure) {
+            temporary.delete();
+            return apk;
+        }
+        File[] all = directory.listFiles((dir, name) -> name.endsWith(".ap_"));
+        if (all != null && all.length > 4) {
+            Arrays.sort(all, (a, b) -> Long.compare(b.lastModified(), a.lastModified()));
+            for (int i = 4; i < all.length; i++) all[i].delete();
+        }
+        return saved;
+    }
+
+    private static String resourceKey(Context context, File project) {
+        long updated = 0;
+        try { updated = context.getPackageManager().getPackageInfo(context.getPackageName(), 0).lastUpdateTime; } catch (Exception ignored) { }
+        StringBuilder text = new StringBuilder();
+        text.append(updated).append('\n').append(project.getAbsolutePath()).append('\n');
+        fingerprintWalk(project, project, text, true);
+        return digest(text.toString());
+    }
+
+    public static String fingerprint(File project, File opened) {
+        StringBuilder text = new StringBuilder();
+        text.append(opened == null ? "" : opened.getAbsolutePath()).append('\n');
+        fingerprintWalk(project, project, text, false);
+        return digest(text.toString());
+    }
+
+    private static void fingerprintWalk(File root, File directory, StringBuilder out, boolean resourcesOnly) {
+        File[] children = directory.listFiles();
+        if (children == null) return;
+        Arrays.sort(children);
+        boolean moduleRoot = directory.equals(root) || new File(directory, "build.gradle").isFile() || new File(directory, "build.gradle.kts").isFile();
+        for (File child : children) {
+            String name = child.getName();
+            if (child.isDirectory()) {
+                if (name.equals(".gradle") || name.equals(".git") || name.equals(".idea") || name.equals("node_modules") || name.equals(".cxx")) continue;
+                if (moduleRoot && name.equals("build")) continue;
+                fingerprintWalk(root, child, out, resourcesOnly);
+                continue;
+            }
+            String relative = child.getAbsolutePath().substring(root.getAbsolutePath().length()).replace('\\', '/');
+            if (resourcesOnly && !affectsResources(relative, name)) continue;
+            out.append(relative).append('|').append(child.length()).append('|').append(child.lastModified()).append('\n');
+        }
+    }
+
+    private static boolean affectsResources(String relative, String name) {
+        if (relative.contains("/res/")) return true;
+        if (name.endsWith(".aar")) return true;
+        return name.equals("AndroidManifest.xml") || name.equals("build.gradle") || name.equals("build.gradle.kts")
+            || name.equals("settings.gradle") || name.equals("settings.gradle.kts") || name.equals("gradle.properties")
+            || name.equals("libs.versions.toml") || name.equals("checksums.properties");
+    }
+
+    private static String digest(String text) {
+        try {
+            byte[] hash = java.security.MessageDigest.getInstance("SHA-1").digest(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder();
+            for (byte b : hash) hex.append(String.format("%02x", b));
+            return hex.toString();
+        } catch (java.security.NoSuchAlgorithmException failure) {
+            return Integer.toHexString(text.hashCode()) + "-" + text.length();
+        }
     }
 
     private static void resolveLibraries(Context context, BuildStageContext stageContext, BuildLogger logger, StringBuilder log, Progress progress) {
