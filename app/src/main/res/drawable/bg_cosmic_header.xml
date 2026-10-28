@@ -2,7 +2,7 @@
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item>
         <shape android:shape="rectangle">
-            <gradient android:angle="300" android:startColor="@color/cosmic_header_start" android:endColor="@color/cosmic_header_end" />
+            <gradient android:angle="315" android:startColor="@color/cosmic_header_start" android:endColor="@color/cosmic_header_end" />
             <corners android:bottomLeftRadius="32dp" android:bottomRightRadius="32dp" />
         </shape>
     </item>
