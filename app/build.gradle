@@ -32,16 +32,31 @@ plugins {
  * ECJ 3.46 calls java.lang.Runtime.version() / Runtime.Version, which Android does not have ("NoClassDefFoundError: Failed resolution of:
  * Ljava/lang/Runtime$Version;" inside Parser.parse). This rewrites the ECJ jar at build time: Runtime.version() becomes
  * com.example.studiomobile.compat.RuntimeVersion.current() and every reference to java.lang.Runtime$Version becomes RuntimeVersion.
+ *
+ * Second patch: ECJ also calls the Java 9 methods InputStream.readAllBytes() / readNBytes(...) / transferTo(...), which Android only has from API 33
+ * ("NoSuchMethodError: No virtual method readAllBytes()[B in class Ljava/io/InputStream;" inside Util.getInputStreamAsByteArray on older phones).
+ * Those calls become static calls to com.example.studiomobile.compat.StreamCompat (receiver stream = first argument). To cover another missing
+ * platform method, add one line to STREAM_CALLS below and the matching static method to StreamCompat.
  */
 class EcjRuntimeVersionPatcher {
     static final String OLD_TYPE = 'java/lang/Runtime$Version'
     static final String RUNTIME = 'java/lang/Runtime'
     static final String SHIM = 'com/example/studiomobile/compat/RuntimeVersion'
+    static final String STREAM_SHIM = 'com/example/studiomobile/compat/StreamCompat'
+
+    // method name + original descriptor -> descriptor of the static StreamCompat method (receiver InputStream added as first parameter)
+    static final Map<String, String> STREAM_CALLS = [
+        'readAllBytes()[B'                : '(Ljava/io/InputStream;)[B',
+        'readNBytes(I)[B'                 : '(Ljava/io/InputStream;I)[B',
+        'readNBytes([BII)I'               : '(Ljava/io/InputStream;[BII)I',
+        'transferTo(Ljava/io/OutputStream;)J': '(Ljava/io/InputStream;Ljava/io/OutputStream;)J'
+    ]
+    // Cheap pre-filter: only classes whose constant pool mentions one of these strings are parsed with ASM.
+    static final List<byte[]> NEEDLES = [OLD_TYPE, 'readAllBytes', 'readNBytes', 'transferTo'].collect { it.getBytes('ISO-8859-1') }
 
     /** @return how many classes were rewritten */
     static int patch(File input, File output) {
         int changed = 0
-        byte[] needle = OLD_TYPE.getBytes('ISO-8859-1')
         ZipFile zip = new ZipFile(input)
         try {
             ZipOutputStream out = new ZipOutputStream(new BufferedOutputStream(new FileOutputStream(output)))
@@ -53,7 +68,7 @@ class EcjRuntimeVersionPatcher {
                     // The patched jar is no longer what the signature files signed.
                     if (name.startsWith('META-INF/') && (name.endsWith('.SF') || name.endsWith('.RSA') || name.endsWith('.DSA') || name.endsWith('.EC'))) continue
                     byte[] data = entry.isDirectory() ? new byte[0] : zip.getInputStream(entry).getBytes()
-                    if (name.endsWith('.class') && !name.endsWith('module-info.class') && indexOf(data, needle) >= 0) {
+                    if (name.endsWith('.class') && !name.endsWith('module-info.class') && NEEDLES.any { indexOf(data, it) >= 0 }) {
                         data = rewrite(data)
                         changed++
                     }
@@ -113,6 +128,14 @@ class RuntimeVersionMethodVisitor extends MethodVisitor {
             // Runtime.version() -> RuntimeVersion.current(); the return type Runtime$Version is remapped afterwards by ClassRemapper.
             super.visitMethodInsn(opcode, EcjRuntimeVersionPatcher.SHIM, 'current', descriptor, false)
             return
+        }
+        // InputStream.readAllBytes() & co. -> StreamCompat. The owner can be any java.* stream type (InputStream, FileInputStream, ZipFile's stream, ...).
+        if (opcode == Opcodes.INVOKEVIRTUAL && owner.startsWith('java/')) {
+            String replacement = EcjRuntimeVersionPatcher.STREAM_CALLS.get(name + descriptor)
+            if (replacement != null) {
+                super.visitMethodInsn(Opcodes.INVOKESTATIC, EcjRuntimeVersionPatcher.STREAM_SHIM, name, replacement, false)
+                return
+            }
         }
         super.visitMethodInsn(opcode, owner, name, descriptor, isInterface)
     }
@@ -230,8 +253,8 @@ tasks.register('patchEcj') {
         File target = ecjPatchedJar.get().asFile
         target.parentFile.mkdirs()
         int changed = EcjRuntimeVersionPatcher.patch(source, target)
-        if (changed == 0) logger.warn("patchEcj: no class in ${source.name} referenced java.lang.Runtime\$Version; the jar was copied unchanged (patch may no longer be needed).")
-        else logger.lifecycle("patchEcj: rewrote ${changed} class(es) in ${source.name} to use RuntimeVersion instead of java.lang.Runtime\$Version")
+        if (changed == 0) logger.warn("patchEcj: no class in ${source.name} needed a rewrite (Runtime\$Version / InputStream.readAllBytes etc.); the jar was copied unchanged (patch may no longer be needed).")
+        else logger.lifecycle("patchEcj: rewrote ${changed} class(es) in ${source.name} (java.lang.Runtime\$Version -> RuntimeVersion, InputStream.readAllBytes/readNBytes/transferTo -> StreamCompat)")
     }
 }
 
