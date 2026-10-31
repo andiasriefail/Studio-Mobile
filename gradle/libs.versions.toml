@@ -13,7 +13,7 @@ kotlin-compiler = "2.4.21"
 r8 = "9.4.29"
 apksig = "9.4.1"
 bouncycastle = "1.86"
-xz = "1.10"
+xz = "1.12"
 quickjs = "0.9.2"
 zip4j = "2.11.5"
 
